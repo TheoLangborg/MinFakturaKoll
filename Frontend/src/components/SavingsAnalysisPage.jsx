@@ -43,7 +43,8 @@ export default function SavingsAnalysisPage({ history }) {
 
         {!history.enabled && !history.error ? (
           <p className="placeholder-text">
-            Historiktjänsten är inte tillgänglig just nu. Kontrollera Firebase-inställningarna i backend `.env`.
+            Historiktjänsten är inte tillgänglig just nu. Kontrollera Firebase-inställningarna i
+            backend `.env`.
           </p>
         ) : null}
 
@@ -78,6 +79,10 @@ export default function SavingsAnalysisPage({ history }) {
               })}
             />
             <SummaryCard label="Månader med data" value={String(monthCount)} />
+            <SummaryCard
+              label="Återkommande leverantörer"
+              value={String(analysis.recurringByVendor.length)}
+            />
             <SummaryCard
               label="Förändring senaste månad"
               value={latestDelta == null ? "-" : formatSignedAmount(latestDelta)}
@@ -180,9 +185,7 @@ export default function SavingsAnalysisPage({ history }) {
                       })}
                     </td>
                     <td>
-                      <span
-                        className={`savings-priority savings-priority--${entry.status || "low"}`}
-                      >
+                      <span className={`savings-priority savings-priority--${entry.status || "low"}`}>
                         {priorityLabel(entry.status)}
                       </span>
                     </td>

@@ -3,19 +3,19 @@ import { toFiniteNumber } from "./numberFormat.js";
 const CATEGORY_BENCHMARKS = {
   Mobil: {
     targetMonthly: 249,
-    alternatives: ["L\u00e4gre surfm\u00e4ngd", "Lojalitetsrabatt", "Kampanj hos annan operat\u00f6r"],
+    alternatives: ["Lägre surfmängd", "Lojalitetsrabatt", "Kampanj hos annan operatör"],
   },
   Internet: {
     targetMonthly: 399,
-    alternatives: ["S\u00e4nk hastighet", "Bindningstidsrabatt", "J\u00e4mf\u00f6r fiberalternativ"],
+    alternatives: ["Sänk hastighet", "Bindningstidsrabatt", "Jämför fiberalternativ"],
   },
   El: {
     targetMonthly: 999,
-    alternatives: ["Timpris", "Fastprisj\u00e4mf\u00f6relse", "Buntad elhandel + n\u00e4t"],
+    alternatives: ["Timpris", "Fastprisjämförelse", "Buntad elhandel + nät"],
   },
-  "F\u00f6rs\u00e4kring": {
+  Försäkring: {
     targetMonthly: 279,
-    alternatives: ["H\u00f6gre sj\u00e4lvrisk", "Samlingsrabatt", "J\u00e4mf\u00f6r villkor mot pris"],
+    alternatives: ["Högre självrisk", "Samlingsrabatt", "Jämför villkor mot pris"],
   },
   Streaming: {
     targetMonthly: 129,
@@ -23,40 +23,43 @@ const CATEGORY_BENCHMARKS = {
   },
   Bank: {
     targetMonthly: 99,
-    alternatives: ["Avgiftsfritt kort", "Flytta sparande", "F\u00f6rhandla paketavgift"],
+    alternatives: ["Avgiftsfritt kort", "Flytta sparande", "Förhandla paketavgift"],
   },
-  "Tj\u00e4nst": {
+  Tjänst: {
     targetMonthly: null,
     alternatives: [
-      "Beg\u00e4r offert fr\u00e5n flera leverant\u00f6rer",
-      "J\u00e4mf\u00f6r timpris och materialp\u00e5slag",
+      "Begär offert från flera leverantörer",
+      "Jämför timpris och materialpåslag",
       "Be om fast pris innan nytt arbete",
     ],
   },
-  "\u00d6vrigt": {
+  Övrigt: {
     targetMonthly: 199,
-    alternatives: ["Prisf\u00f6rhandling", "Byt paket", "S\u00e4g upp outnyttjade tj\u00e4nster"],
+    alternatives: ["Prisförhandling", "Byt paket", "Säg upp outnyttjade tjänster"],
   },
 };
 
 export function analyzeSavingsFromHistory(items = []) {
   const normalizedItems = normalizeHistoryItems(items);
   const recurring = buildRecurringServices(normalizedItems);
+  const recurringByVendor = buildRecurringVendors(recurring);
   const monthSummary = buildMonthSummary(normalizedItems);
   const monthlyTotals = buildMonthlyTotals(normalizedItems);
   const categorySummary = buildCategorySummary(recurring);
   const opportunities = recurring
     .filter((entry) => entry.potentialSaving >= 20 || (entry.trendPercent ?? 0) >= 8)
-    .slice(0, 8);
+    .slice(0, 12);
 
   return {
     summary: {
       recurringCount: recurring.length,
+      recurringVendorCount: recurringByVendor.length,
       opportunityCount: opportunities.length,
       estimatedMonthlySaving: recurring.reduce((acc, entry) => acc + entry.potentialSaving, 0),
       ...monthSummary,
     },
     recurring,
+    recurringByVendor,
     opportunities,
     monthlyTotals,
     categorySummary,
@@ -70,7 +73,7 @@ function normalizeHistoryItems(items) {
       const date = resolveDate(item);
       if (!Number.isFinite(amount) || amount <= 0 || !date) return null;
 
-      const vendorName = cleanText(item?.vendorName) || "Ok\u00e4nd leverant\u00f6r";
+      const vendorName = cleanText(item?.vendorName) || "Okänd leverantör";
       const category = normalizeCategory(item?.category);
       const currency = cleanText(item?.currency) || "SEK";
       const monthKey = toMonthKey(date);
@@ -83,6 +86,13 @@ function normalizeHistoryItems(items) {
         amount,
         date,
         monthKey,
+        invoiceNumber: cleanText(item?.invoiceNumber),
+        customerNumber: cleanText(item?.customerNumber),
+        dueDate: cleanText(item?.dueDate),
+        paymentMethod: cleanText(item?.paymentMethod),
+        organizationNumber: cleanText(item?.organizationNumber),
+        sourceType: cleanText(item?.sourceType),
+        billingType: cleanText(item?.billingType),
       };
     })
     .filter(Boolean);
@@ -129,7 +139,7 @@ function buildRecurringServices(items) {
   const recurring = [];
 
   for (const group of groups.values()) {
-    if (normalizeCategory(group.category) === "Tj\u00e4nst") continue;
+    if (normalizeCategory(group.category) === "Tjänst") continue;
 
     const sorted = [...group.entries].sort((a, b) => a.date.getTime() - b.date.getTime());
     const monthlyEntries = collapseEntriesByMonth(sorted);
@@ -140,6 +150,8 @@ function buildRecurringServices(items) {
 
     const latest = monthlyEntries[monthlyEntries.length - 1];
     const previous = findPreviousMonthEntry(monthlyEntries, latest.monthKey);
+    const latestSource = findLatestSourceForMonth(sorted, latest.monthKey);
+    const previousSource = previous ? findLatestSourceForMonth(sorted, previous.monthKey) : null;
     const previousAmount = Number.isFinite(previous?.amount) ? previous.amount : null;
     const averageAmount = mean(monthlyEntries.map((entry) => entry.amount));
     const trendPercent = computeTrendPercent(previous?.amount, latest.amount);
@@ -154,19 +166,21 @@ function buildRecurringServices(items) {
     recurring.push({
       key: group.key,
       vendorName: group.vendorName,
+      vendorKey: normalizeVendorKey(group.vendorName),
       category: group.category,
       currency: group.currency,
       monthsObserved: uniqueMonths.length,
       latestMonth: latest.monthKey,
       latestAmount: latest.amount,
+      previousMonth: previous?.monthKey || "",
       previousAmount,
-      averageAmount: averageAmount,
+      averageAmount,
       trendPercent,
       targetMonthly,
       benchmarkGap,
       potentialSaving,
       status: classifyStatus({ potentialSaving, trendPercent }),
-      question: `Anv\u00e4nder du fortfarande ${group.vendorName}?`,
+      question: `Använder du fortfarande ${group.vendorName}?`,
       recommendations: buildRecommendations({
         category: group.category,
         vendorName: group.vendorName,
@@ -177,23 +191,94 @@ function buildRecurringServices(items) {
         targetMonthly,
       }),
       alternatives: benchmark.alternatives,
+      historyId: latestSource?.id || "",
+      invoiceNumber: latestSource?.invoiceNumber || "",
+      customerNumber: latestSource?.customerNumber || "",
+      dueDate: latestSource?.dueDate || "",
+      paymentMethod: latestSource?.paymentMethod || "",
+      organizationNumber: latestSource?.organizationNumber || "",
+      sourceType: latestSource?.sourceType || "",
+      billingType: latestSource?.billingType || "",
+      previousInvoiceNumber: previousSource?.invoiceNumber || "",
     });
   }
 
   return recurring.sort((a, b) => {
-    if (b.potentialSaving !== a.potentialSaving) {
-      return b.potentialSaving - a.potentialSaving;
-    }
+    if (b.potentialSaving !== a.potentialSaving) return b.potentialSaving - a.potentialSaving;
     return (b.trendPercent || 0) - (a.trendPercent || 0);
   });
+}
+
+function buildRecurringVendors(recurringServices) {
+  const grouped = new Map();
+
+  for (const service of recurringServices) {
+    const key = service.vendorKey || normalizeVendorKey(service.vendorName);
+    const existing = grouped.get(key);
+    if (!existing) {
+      grouped.set(key, {
+        key,
+        vendorName: service.vendorName,
+        currency: service.currency || "SEK",
+        monthsObserved: service.monthsObserved || 0,
+        latestAmount: Number(service.latestAmount) || 0,
+        previousAmount: Number.isFinite(service.previousAmount) ? service.previousAmount : null,
+        internalPotential: Number(service.potentialSaving) || 0,
+        categories: new Set([service.category]),
+        serviceKeys: [service.key],
+        serviceCount: 1,
+      });
+      continue;
+    }
+
+    existing.monthsObserved = Math.max(existing.monthsObserved, service.monthsObserved || 0);
+    existing.latestAmount += Number(service.latestAmount) || 0;
+    if (Number.isFinite(service.previousAmount)) {
+      existing.previousAmount =
+        (Number.isFinite(existing.previousAmount) ? existing.previousAmount : 0) +
+        service.previousAmount;
+    }
+    existing.internalPotential += Number(service.potentialSaving) || 0;
+    existing.categories.add(service.category);
+    existing.serviceKeys.push(service.key);
+    existing.serviceCount += 1;
+  }
+
+  return [...grouped.values()]
+    .map((entry) => {
+      const trendPercent = computeTrendPercent(entry.previousAmount, entry.latestAmount);
+      return {
+        key: entry.key,
+        vendorName: entry.vendorName,
+        currency: entry.currency,
+        monthsObserved: entry.monthsObserved,
+        latestAmount: round2(entry.latestAmount),
+        previousAmount: Number.isFinite(entry.previousAmount) ? round2(entry.previousAmount) : null,
+        trendPercent,
+        internalPotential: round2(entry.internalPotential),
+        categories: [...entry.categories].sort((a, b) => a.localeCompare(b, "sv-SE")),
+        serviceKeys: entry.serviceKeys,
+        serviceCount: entry.serviceCount,
+      };
+    })
+    .sort((a, b) => {
+      if (b.internalPotential !== a.internalPotential) return b.internalPotential - a.internalPotential;
+      return (b.latestAmount || 0) - (a.latestAmount || 0);
+    });
 }
 
 function findPreviousMonthEntry(sortedEntries, latestMonth) {
   for (let index = sortedEntries.length - 2; index >= 0; index -= 1) {
     const candidate = sortedEntries[index];
-    if (candidate.monthKey !== latestMonth) {
-      return candidate;
-    }
+    if (candidate.monthKey !== latestMonth) return candidate;
+  }
+  return null;
+}
+
+function findLatestSourceForMonth(sortedEntries, monthKey) {
+  for (let index = sortedEntries.length - 1; index >= 0; index -= 1) {
+    const candidate = sortedEntries[index];
+    if (candidate.monthKey === monthKey) return candidate;
   }
   return null;
 }
@@ -204,7 +289,7 @@ function collapseEntriesByMonth(sortedEntries) {
   for (const entry of sortedEntries) {
     const existing = monthMap.get(entry.monthKey);
     if (!existing) {
-      monthMap.set(entry.monthKey, { ...entry });
+      monthMap.set(entry.monthKey, { monthKey: entry.monthKey, date: entry.date, amount: entry.amount });
       continue;
     }
 
@@ -227,14 +312,10 @@ function isLikelyRecurring(monthKeys) {
   }
 
   if (!gaps.length) return false;
-
-  if (sortedMonthKeys.length === 2) {
-    return gaps[0] <= 2;
-  }
+  if (sortedMonthKeys.length === 2) return gaps[0] <= 2;
 
   const adjacentSteps = gaps.filter((gap) => gap === 1).length;
   const hasLargeGap = gaps.some((gap) => gap > 3);
-
   if (adjacentSteps === 0) return false;
   if (hasLargeGap && sortedMonthKeys.length < 4) return false;
   return true;
@@ -270,32 +351,34 @@ function buildRecommendations({
   targetMonthly,
 }) {
   const recommendations = [];
-  if (normalizeCategory(category) === "Tj\u00e4nst") {
+  if (normalizeCategory(category) === "Tjänst") {
     recommendations.push(
-      "Detta ser ut som en eng\u00e5ngstj\u00e4nst och r\u00e4knas inte som \u00e5terkommande m\u00e5nadskostnad."
+      "Detta ser ut som en engångstjänst och räknas inte som återkommande månadskostnad."
     );
-    recommendations.push("Kontrollera att arbete, material och moms \u00e4r tydligt specificerade.");
-    recommendations.push(`Be ${vendorName} om pris\u00f6versyn eller fastpris vid liknande jobb.`);
+    recommendations.push("Kontrollera att arbete, material och moms är tydligt specificerade.");
+    recommendations.push(`Be ${vendorName} om prisöversyn eller fastpris vid liknande jobb.`);
     return recommendations.slice(0, 3);
   }
 
   if (Number.isFinite(targetMonthly) && benchmarkGap >= 20) {
     recommendations.push(
-      `Du ligger \u00f6ver riktpris f\u00f6r ${category.toLowerCase()} (ca ${targetMonthly} kr/m\u00e5n).`
+      `Du ligger över riktpris för ${category.toLowerCase()} (ca ${targetMonthly} kr/mån).`
     );
   }
 
   if (previousAmount != null && potentialSaving >= 20) {
-    recommendations.push(`Kostnaden ligger ${Math.round(potentialSaving)} kr \u00f6ver f\u00f6reg\u00e5ende m\u00e5nad.`);
+    recommendations.push(
+      `Kostnaden ligger ${Math.round(potentialSaving)} kr över föregående månad.`
+    );
   }
 
   if ((trendPercent ?? 0) >= 8) {
     recommendations.push(
-      `Kostnaden har \u00f6kat ${Math.round(trendPercent)}% mot f\u00f6reg\u00e5ende m\u00e5nad.`
+      `Kostnaden har ökat ${Math.round(trendPercent)}% mot föregående månad.`
     );
   }
 
-  recommendations.push(`Be ${vendorName} om pris\u00f6versyn eller lojalitetsrabatt.`);
+  recommendations.push(`Be ${vendorName} om prisöversyn eller lojalitetsrabatt.`);
   return recommendations.slice(0, 3);
 }
 
@@ -313,8 +396,7 @@ function buildMonthSummary(items) {
   const latestTotal = latestMonth ? totalsByMonth.get(latestMonth) || 0 : 0;
   const previousTotal = previousMonth ? totalsByMonth.get(previousMonth) || 0 : 0;
   const delta = round2(latestTotal - previousTotal);
-  const deltaPercent =
-    previousTotal > 0 ? round2((delta / previousTotal) * 100) : null;
+  const deltaPercent = previousTotal > 0 ? round2((delta / previousTotal) * 100) : null;
 
   return {
     latestMonth,
@@ -353,7 +435,6 @@ function buildCategorySummary(recurring) {
     previous.serviceCount += 1;
     previous.totalLatestAmount += Number(entry.latestAmount) || 0;
     previous.totalPotentialSaving += Number(entry.potentialSaving) || 0;
-
     grouped.set(entry.category, previous);
   }
 
@@ -373,7 +454,7 @@ function classifyStatus({ potentialSaving, trendPercent }) {
 }
 
 function getBenchmark(category) {
-  return CATEGORY_BENCHMARKS[normalizeCategory(category)] || CATEGORY_BENCHMARKS["\u00d6vrigt"];
+  return CATEGORY_BENCHMARKS[normalizeCategory(category)] || CATEGORY_BENCHMARKS.Övrigt;
 }
 
 function normalizeCategory(value) {
@@ -382,30 +463,37 @@ function normalizeCategory(value) {
     mobil: "Mobil",
     internet: "Internet",
     el: "El",
-    "f\u00f6rs\u00e4kring": "F\u00f6rs\u00e4kring",
-    forsakring: "F\u00f6rs\u00e4kring",
+    försäkring: "Försäkring",
+    forsakring: "Försäkring",
     streaming: "Streaming",
     bank: "Bank",
-    "tj\u00e4nst": "Tj\u00e4nst",
-    tjanst: "Tj\u00e4nst",
-    service: "Tj\u00e4nst",
-    hantverk: "Tj\u00e4nst",
-    installation: "Tj\u00e4nst",
-    renovering: "Tj\u00e4nst",
-    "\u00f6vrigt": "\u00d6vrigt",
-    ovrigt: "\u00d6vrigt",
+    tjänst: "Tjänst",
+    tjanst: "Tjänst",
+    service: "Tjänst",
+    hantverk: "Tjänst",
+    installation: "Tjänst",
+    renovering: "Tjänst",
+    övrigt: "Övrigt",
+    ovrigt: "Övrigt",
   };
-  return map[key] || "\u00d6vrigt";
+  return map[key] || "Övrigt";
+}
+
+function normalizeVendorKey(value) {
+  return cleanText(value)
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "")
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
 }
 
 function parseDate(value) {
   if (!value) return null;
-
   const date = new Date(value);
   if (!Number.isNaN(date.getTime())) return date;
 
   if (typeof value !== "string") return null;
-
   const match = value.match(/^(\d{4})-(\d{2})-(\d{2})$/);
   if (!match) return null;
   const localDate = new Date(`${match[1]}-${match[2]}-${match[3]}T00:00:00`);

@@ -95,12 +95,12 @@ function EditableMetricCard({
   );
 }
 
-export default function AnalysisPanel({ result, extracted, fieldMeta, onFieldChange }) {
+export default function AnalysisPanel({ panelId, result, extracted, fieldMeta, onFieldChange }) {
   const missingFields = getMissingFields(extracted);
   const savingsInsight = getSavingsInsight(extracted);
 
   return (
-    <article className="panel">
+    <article id={panelId} className="panel">
       <div className="panel-header">
         <span className="step-badge">Steg 2</span>
         <h2>Analysresultat</h2>

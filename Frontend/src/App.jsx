@@ -26,12 +26,25 @@ export default function App() {
   const loadHistory = history.loadHistory;
   const scanner = useInvoiceScanner({ onHistoryChanged: loadHistory });
   const [activeView, setActiveView] = useState("scan");
-  const identityLabel = String(session?.displayName || "").trim() || session?.email || "Inloggad användare";
+  const identityLabel =
+    String(session?.displayName || "").trim() || session?.email || "Inloggad användare";
 
   function handleLogout() {
     clearStoredAuthSession();
     setSession(null);
     setActiveView("scan");
+  }
+
+  function openQueueResult(itemId) {
+    const opened = scanner.onShowQueueItemResult(itemId);
+    if (!opened) return;
+
+    requestAnimationFrame(() => {
+      const target = document.getElementById("analysis-result-panel");
+      if (target) {
+        target.scrollIntoView({ behavior: "smooth", block: "start" });
+      }
+    });
   }
 
   useEffect(() => {
@@ -149,6 +162,14 @@ export default function App() {
             <section className="panel-grid">
               <InvoiceInputPanel
                 invoiceFile={scanner.invoiceFile}
+                queueItems={scanner.queueItems}
+                queueProgress={scanner.queueProgress}
+                analyzableQueueCount={scanner.analyzableQueueCount}
+                analyzedFileSummaries={scanner.analyzedFileSummaries}
+                isQueueBatchComplete={scanner.isQueueBatchComplete}
+                selectedQueueItemId={scanner.selectedQueueItemId}
+                activeQueueItemId={scanner.activeQueueItemId}
+                maxQueueFiles={scanner.maxQueueFiles}
                 isDragging={scanner.isDragging}
                 text={scanner.text}
                 error={scanner.error}
@@ -159,12 +180,17 @@ export default function App() {
                 onDragOver={scanner.onDragOver}
                 onDragLeave={scanner.onDragLeave}
                 onDrop={scanner.onDrop}
+                onSelectQueueItem={scanner.onSelectQueueItem}
+                onShowQueueItemResult={openQueueResult}
+                onRemoveQueueItem={scanner.onRemoveQueueItem}
                 onAnalyze={scanner.analyze}
+                onAnalyzeSelected={scanner.analyzeSelected}
                 onClear={scanner.clearAll}
                 onOpenPreview={scanner.openPreview}
               />
 
               <AnalysisPanel
+                panelId="analysis-result-panel"
                 result={scanner.result}
                 extracted={scanner.editedExtracted}
                 fieldMeta={scanner.fieldMeta}
