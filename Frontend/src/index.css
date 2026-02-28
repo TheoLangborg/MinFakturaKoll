@@ -1,0 +1,50 @@
+@import url("https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500&display=swap");
+
+:root {
+  --font-display: "Space Grotesk", "Segoe UI", sans-serif;
+  --font-mono: "IBM Plex Mono", "Consolas", monospace;
+
+  --ink-900: #13212f;
+  --ink-800: #1f3647;
+  --ink-700: #2f4c60;
+  --ink-600: #466075;
+  --ink-500: #5d7485;
+
+  --panel-bg: rgba(255, 255, 255, 0.8);
+  --panel-border: rgba(47, 76, 96, 0.2);
+  --panel-border-strong: rgba(47, 76, 96, 0.34);
+  --upload-bg: rgba(13, 116, 132, 0.06);
+  --textarea-bg: rgba(255, 255, 255, 0.76);
+  --metric-bg: rgba(255, 255, 255, 0.7);
+
+  --accent-soft: rgba(27, 155, 134, 0.18);
+  --accent-ink: #106459;
+  --accent-strong: #138071;
+
+  font-synthesis: none;
+  text-rendering: optimizeLegibility;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+}
+
+html,
+body,
+#root {
+  min-height: 100%;
+}
+
+body {
+  margin: 0;
+  font-family: var(--font-display);
+  color: var(--ink-900);
+  background:
+    radial-gradient(circle at 8% 4%, rgba(27, 155, 134, 0.18), rgba(27, 155, 134, 0) 30%),
+    radial-gradient(circle at 92% 86%, rgba(221, 126, 73, 0.15), rgba(221, 126, 73, 0) 28%),
+    linear-gradient(160deg, #f4f7ee 0%, #e7f6ef 44%, #f8eee4 100%);
+}

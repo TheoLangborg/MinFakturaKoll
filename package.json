@@ -1,0 +1,16 @@
+﻿{
+    "name": "minkostnadskoll",
+    "private": true,
+    "scripts": {
+        "dev": "concurrently -n FRONTEND,BACKEND -c blue,magenta \"npm --prefix Frontend run dev\" \"npm --prefix Backend run dev\"",
+        "frontend": "npm --prefix Frontend run dev",
+        "backend": "npm --prefix Backend run dev"
+    },
+    "devDependencies": {
+        "concurrently": "^9.2.1"
+    },
+    "dependencies": {
+        "firebase": "^12.10.0"
+    }
+}
+
