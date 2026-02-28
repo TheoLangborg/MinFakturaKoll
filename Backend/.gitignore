@@ -1,0 +1,5 @@
+.ignore
+.env
+.env.*
+firebase.ignore
+*firebase-adminsdk-*.json

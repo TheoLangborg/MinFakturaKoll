@@ -1,5 +1,10 @@
-﻿node_modules/
+node_modules/
 .env
 .env.*
 Frontend/node_modules/
 Backend/node_modules/
+.ignore
+firebase.ignore
+Backend/firebase.ignore
+*firebase-adminsdk-*.json
+Backend/*firebase-adminsdk-*.json
