@@ -18,8 +18,9 @@ const QUEUE_STATUS = {
   error: "error",
 };
 
-export function useInvoiceScanner({ onHistoryChanged } = {}) {
+export function useInvoiceScanner({ onHistoryChanged, historyItems = [] } = {}) {
   const [queueItems, setQueueItems] = useState([]);
+  const [pendingDuplicateItems, setPendingDuplicateItems] = useState([]);
   const [selectedQueueItemId, setSelectedQueueItemId] = useState("");
   const [activeQueueItemId, setActiveQueueItemId] = useState("");
   const [standaloneText, setStandaloneText] = useState(SAMPLE_TEXT);
@@ -199,11 +200,29 @@ export function useInvoiceScanner({ onHistoryChanged } = {}) {
     const skippedByLimit = incoming.length - acceptedFiles.length;
 
     const prepared = [];
+    const duplicateCandidates = [];
+    const duplicateNames = [];
     const itemErrors = [];
+    const existingDedupeKeys = new Set(
+      [
+        ...queueItems.map((item) => resolveQueueItemDedupeKey(item)),
+        ...historyItems.map((item) => resolveHistoryItemDedupeKey(item)),
+      ].filter(Boolean)
+    );
 
     for (const file of acceptedFiles) {
       try {
         const preparedItem = await buildQueueItem(file);
+        const dedupeKey = resolveQueueItemDedupeKey(preparedItem);
+        if (dedupeKey && existingDedupeKeys.has(dedupeKey)) {
+          duplicateNames.push(file.name || "Okänd fil");
+          duplicateCandidates.push(preparedItem);
+          continue;
+        }
+
+        if (dedupeKey) {
+          existingDedupeKeys.add(dedupeKey);
+        }
         prepared.push(preparedItem);
       } catch (caughtError) {
         const reason = toUserErrorMessage(caughtError, "okänt fel vid filuppladdning");
@@ -215,12 +234,20 @@ export function useInvoiceScanner({ onHistoryChanged } = {}) {
       setQueueItems((previous) => [...previous, ...prepared]);
       setSelectedQueueItemId((previous) => previous || prepared[0].id);
     }
+    setPendingDuplicateItems(duplicateCandidates);
 
-    if (skippedByLimit > 0 || itemErrors.length > 0) {
+    if (skippedByLimit > 0 || duplicateNames.length > 0 || itemErrors.length > 0) {
       const messages = [];
       if (skippedByLimit > 0) {
         messages.push(
           `${skippedByLimit} fil${skippedByLimit > 1 ? "er" : ""} hoppades över eftersom maxgränsen är ${MAX_QUEUE_FILES}.`
+        );
+      }
+      if (duplicateNames.length > 0) {
+        messages.push(
+          `${duplicateNames.length} dubblett${
+            duplicateNames.length > 1 ? "er" : ""
+          } hittades i kö/historik och hoppades över: ${duplicateNames.join(", ")}.`
         );
       }
       if (itemErrors.length > 0) {
@@ -228,6 +255,19 @@ export function useInvoiceScanner({ onHistoryChanged } = {}) {
       }
       setWarning(messages.join(" "));
     }
+  }
+
+  function addDuplicateItemsAnyway() {
+    if (!pendingDuplicateItems.length) return;
+
+    setQueueItems((previous) => [...previous, ...pendingDuplicateItems]);
+    setSelectedQueueItemId((previous) => previous || pendingDuplicateItems[0].id);
+    setPendingDuplicateItems([]);
+    setWarning(
+      `${pendingDuplicateItems.length} dubblett${
+        pendingDuplicateItems.length > 1 ? "er" : ""
+      } lades till manuellt.`
+    );
   }
 
   function onFileChange(event) {
@@ -500,6 +540,7 @@ export function useInvoiceScanner({ onHistoryChanged } = {}) {
 
   function clearAll() {
     setQueueItems([]);
+    setPendingDuplicateItems([]);
     setSelectedQueueItemId("");
     setActiveQueueItemId("");
     setStandaloneText("");
@@ -541,6 +582,7 @@ export function useInvoiceScanner({ onHistoryChanged } = {}) {
     error,
     warning,
     email,
+    duplicateCandidateCount: pendingDuplicateItems.length,
     emailTemplates,
     selectedTemplateId,
     setText,
@@ -551,6 +593,7 @@ export function useInvoiceScanner({ onHistoryChanged } = {}) {
     onSelectQueueItem: selectQueueItem,
     onShowQueueItemResult: showQueueItemResult,
     onRemoveQueueItem: removeQueueItem,
+    addDuplicateItemsAnyway,
     analyze,
     analyzeSelected,
     copyEmail,
@@ -589,35 +632,118 @@ async function buildQueueItem(file) {
     fileInfo.previewKind = "text";
     fileInfo.textPreview = trimmed || "(Tom textfil)";
     text = trimmed;
-    return createQueueItem(fileInfo, text);
+    const fingerprint = await createFingerprint(`text:${text}`);
+    return createQueueItem(fileInfo, text, fingerprint);
   }
 
   if (isImageType(fileType)) {
     fileInfo.previewKind = "image";
     fileInfo.previewSrc = await readAsDataUrl(file);
-    return createQueueItem(fileInfo, text);
+    const fingerprint = await createFingerprint(`image:${fileInfo.previewSrc}`);
+    return createQueueItem(fileInfo, text, fingerprint);
   }
 
   if (isPdfType(fileType, file.name)) {
     fileInfo.previewKind = "pdf";
     fileInfo.previewSrc = await readAsDataUrl(file);
     text = `Fakturafil: ${file.name}\nPDF laddad. Komplettera OCR-text vid behov.`;
-    return createQueueItem(fileInfo, text);
+    const fingerprint = await createFingerprint(`pdf:${fileInfo.previewSrc}`);
+    return createQueueItem(fileInfo, text, fingerprint);
   }
 
   throw new Error("Filtypen kunde inte förhandsvisas. Prova PDF, bild eller textfil.");
 }
 
-function createQueueItem(fileInfo, text) {
+function createQueueItem(fileInfo, text, fingerprint = "", dedupeKey = "") {
   return {
     id: `${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
     file: fileInfo,
+    fingerprint,
+    dedupeKey,
     text,
     status: QUEUE_STATUS.pending,
     error: "",
     warning: "",
     result: null,
   };
+}
+
+function resolveQueueItemDedupeKey(item) {
+  const directKey = String(item?.dedupeKey || "").trim();
+  if (directKey) return directKey;
+
+  const previewKind = String(item?.file?.previewKind || "").toLowerCase();
+  if ((previewKind === "image" || previewKind === "pdf") && item?.file?.previewSrc) {
+    return createDedupeKey(`${previewKind}:${item.file.previewSrc}`);
+  }
+  if (previewKind === "text") {
+    const text = String(item?.text || item?.file?.textPreview || "").trim();
+    if (text) {
+      return createDedupeKey(`text:${text}`);
+    }
+  }
+
+  const fileName = String(item?.file?.name || "").trim();
+  const fileSize = Number(item?.file?.size || 0);
+  const text = String(item?.text || "").trim();
+  return createDedupeKey(`legacy:${previewKind}|${fileName}|${fileSize}|${text.slice(0, 120)}`);
+}
+
+function resolveHistoryItemDedupeKey(item) {
+  const preview = item?.filePreview;
+  if (!preview || typeof preview !== "object") return "";
+
+  const previewKind = String(preview.previewKind || "").toLowerCase();
+  if ((previewKind === "image" || previewKind === "pdf") && preview.previewSrc) {
+    return createDedupeKey(`${previewKind}:${preview.previewSrc}`);
+  }
+  if (previewKind === "text" && preview.textPreview) {
+    return createDedupeKey(`text:${preview.textPreview}`);
+  }
+  return "";
+}
+
+function createDedupeKey(source) {
+  const text = String(source || "");
+  if (!text) return "";
+  return `dedupe:${simpleHash(text)}`;
+}
+
+async function createFingerprint(source) {
+  const text = String(source || "");
+  if (!text) return "";
+
+  try {
+    const cryptoApi = globalThis.crypto;
+    if (!cryptoApi?.subtle) {
+      return `fallback:${simpleHash(text)}`;
+    }
+    const encoded = new TextEncoder().encode(text);
+    const digest = await cryptoApi.subtle.digest("SHA-256", encoded);
+    return bytesToHex(new Uint8Array(digest));
+  } catch {
+    return `fallback:${simpleHash(text)}`;
+  }
+}
+
+function bytesToHex(bytes) {
+  return Array.from(bytes)
+    .map((byte) => byte.toString(16).padStart(2, "0"))
+    .join("");
+}
+
+function simpleHash(text) {
+  let hash = 2166136261;
+  for (let i = 0; i < text.length; i += 1) {
+    hash ^= text.charCodeAt(i);
+    hash +=
+      (hash << 1) +
+      (hash << 4) +
+      (hash << 7) +
+      (hash << 8) +
+      (hash << 24);
+  }
+  return (hash >>> 0).toString(16);
 }
 
 function buildPayloadFromQueueItem(queueItem) {

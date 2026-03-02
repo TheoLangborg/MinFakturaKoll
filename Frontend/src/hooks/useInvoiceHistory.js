@@ -59,12 +59,14 @@ export function useInvoiceHistory({ enabled: authEnabled = true } = {}) {
       setItems((previous) =>
         previous.map((item) => {
           if (item.id !== id) return item;
-          const dueDate = extracted?.dueDate || null;
+          const dueDate = extracted?.dueDate ?? item.dueDate ?? null;
+          const paid = Boolean(extracted?.paid ?? item.paid);
           return {
             ...item,
             ...extracted,
             dueDate,
-            status: inferStatus(dueDate),
+            paid,
+            status: inferStatus(dueDate, paid),
           };
         })
       );
@@ -180,7 +182,8 @@ export function useInvoiceHistory({ enabled: authEnabled = true } = {}) {
   };
 }
 
-function inferStatus(dueDate) {
+function inferStatus(dueDate, paid = false) {
+  if (paid) return "Betald";
   if (!dueDate) return "Okänt";
   const due = new Date(`${dueDate}T00:00:00`);
   if (Number.isNaN(due.getTime())) return "Okänt";

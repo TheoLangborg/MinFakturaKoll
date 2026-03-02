@@ -20,6 +20,10 @@ export default function ProfileMenu({ session, onLogout }) {
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
   const [info, setInfo] = useState("");
+  const [inboxAddress, setInboxAddress] = useState("");
+  const [inboxLoading, setInboxLoading] = useState(false);
+  const [inboxError, setInboxError] = useState("");
+  const [inboxCopyState, setInboxCopyState] = useState("idle");
 
   const avatarLabel = useMemo(() => {
     const source = String(session?.displayName || session?.email || "U");
@@ -36,6 +40,36 @@ export default function ProfileMenu({ session, onLogout }) {
     setError("");
     setInfo("");
   }, [profileOpen, session?.displayName, session?.email]);
+
+  useEffect(() => {
+    if (!profileOpen || inboxAddress || inboxLoading) return;
+
+    let cancelled = false;
+
+    async function bootstrapInboxAddress() {
+      setInboxLoading(true);
+      setInboxError("");
+      try {
+        const address = await requestInboxAddress();
+        if (!cancelled) {
+          setInboxAddress(address);
+        }
+      } catch (caughtError) {
+        if (!cancelled) {
+          setInboxError(toUserErrorMessage(caughtError, "Kunde inte hämta import-mail."));
+        }
+      } finally {
+        if (!cancelled) {
+          setInboxLoading(false);
+        }
+      }
+    }
+
+    void bootstrapInboxAddress();
+    return () => {
+      cancelled = true;
+    };
+  }, [inboxAddress, inboxLoading, profileOpen]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -166,6 +200,35 @@ export default function ProfileMenu({ session, onLogout }) {
     }
   }
 
+  async function handleRefreshInbox() {
+    setInboxLoading(true);
+    setInboxError("");
+    try {
+      const address = await requestInboxAddress();
+      setInboxAddress(address);
+    } catch (caughtError) {
+      setInboxError(toUserErrorMessage(caughtError, "Kunde inte uppdatera import-mail."));
+    } finally {
+      setInboxLoading(false);
+    }
+  }
+
+  async function handleCopyInbox() {
+    if (!inboxAddress) return;
+    try {
+      await navigator.clipboard.writeText(inboxAddress);
+      setInboxCopyState("copied");
+      window.setTimeout(() => {
+        setInboxCopyState((prev) => (prev === "copied" ? "idle" : prev));
+      }, 1600);
+    } catch {
+      setInboxCopyState("error");
+      window.setTimeout(() => {
+        setInboxCopyState((prev) => (prev === "error" ? "idle" : prev));
+      }, 1600);
+    }
+  }
+
   return (
     <>
       <div className="profile-menu-wrap" ref={wrapRef}>
@@ -207,7 +270,12 @@ export default function ProfileMenu({ session, onLogout }) {
       </div>
 
       {profileOpen && (
-        <div className="profile-modal" role="dialog" aria-modal="true" onClick={() => !loading && setProfileOpen(false)}>
+        <div
+          className="profile-modal"
+          role="dialog"
+          aria-modal="true"
+          onClick={() => !loading && !inboxLoading && setProfileOpen(false)}
+        >
           <article className="profile-modal-card" onClick={(event) => event.stopPropagation()}>
             <header className="profile-modal-header">
               <div>
@@ -217,7 +285,7 @@ export default function ProfileMenu({ session, onLogout }) {
               <button
                 type="button"
                 className="btn btn-secondary"
-                disabled={loading}
+                disabled={loading || inboxLoading}
                 onClick={() => setProfileOpen(false)}
               >
                 Stäng
@@ -299,11 +367,46 @@ export default function ProfileMenu({ session, onLogout }) {
                 </div>
               </section>
 
+              <section className="profile-section">
+                <h4>Maila in fakturor</h4>
+                <p>Vidarebefordra PDF- och bildfakturor hit. Analysen sparas automatiskt i historiken.</p>
+                <div className="profile-inbox-row">
+                  <input
+                    className="metric-input profile-inbox-input"
+                    readOnly
+                    value={
+                      inboxLoading
+                        ? "Skapar import-mail..."
+                        : inboxAddress || "Ingen import-mail tillgänglig"
+                    }
+                  />
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleCopyInbox}
+                    disabled={!inboxAddress || inboxLoading || loading}
+                  >
+                    {inboxCopyState === "copied"
+                      ? "Kopierad"
+                      : inboxCopyState === "error"
+                        ? "Misslyckades"
+                        : "Kopiera"}
+                  </button>
+                  <button
+                    type="button"
+                    className="btn btn-secondary"
+                    onClick={handleRefreshInbox}
+                    disabled={inboxLoading || loading}
+                  >
+                    {inboxLoading ? "Laddar..." : "Uppdatera"}
+                  </button>
+                </div>
+                {inboxError ? <p className="profile-inline-error">{inboxError}</p> : null}
+              </section>
+
               <section className="profile-section profile-danger-zone">
                 <h4>Farlig zon</h4>
-                <p>
-                  Raderar konto och all historik kopplad till användaren. Åtgärden kan inte ångras.
-                </p>
+                <p>Raderar konto och all historik kopplad till användaren. Åtgärden kan inte ångras.</p>
                 <label className="auth-field">
                   Skriv <strong>RADERA</strong> för att bekräfta
                   <input
@@ -333,4 +436,17 @@ export default function ProfileMenu({ session, onLogout }) {
       )}
     </>
   );
+}
+
+async function requestInboxAddress() {
+  const response = await apiFetch("/api/inbox/create", {
+    method: "POST",
+  });
+  const json = await response.json();
+
+  if (!response.ok || !json.ok) {
+    throw new Error(json.error || "Kunde inte hämta import-mail.");
+  }
+
+  return String(json.inboxAddress || "").trim();
 }

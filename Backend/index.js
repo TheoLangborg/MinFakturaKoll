@@ -6,6 +6,10 @@ import testRoute from "./routes/testRoute.js";
 import historyRoute from "./routes/historyRoute.js";
 import marketRoute from "./routes/marketRoute.js";
 import accountRoute from "./routes/accountRoute.js";
+import inboxRoute from "./routes/inboxRoute.js";
+import mailgunWebhookRoute from "./routes/mailgunWebhookRoute.js";
+import devRoute from "./routes/devRoute.js";
+import { startInboundInvoiceWorker } from "./services/mailgunInboundInvoiceService.js";
 
 dotenv.config();
 
@@ -28,7 +32,12 @@ app.use("/api", scanRoute);
 app.use("/api/history", historyRoute);
 app.use("/api/market", marketRoute);
 app.use("/api/account", accountRoute);
+app.use("/api/inbox", inboxRoute);
 app.use("/api/test", testRoute);
+app.use("/webhooks/mailgun", mailgunWebhookRoute);
+app.use("/dev", devRoute);
+
+startInboundInvoiceWorker();
 
 app.listen(port, () => {
   console.log(`MinKostnadskoll backend startad: http://localhost:${port}`);

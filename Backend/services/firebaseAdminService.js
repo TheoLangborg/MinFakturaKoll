@@ -4,12 +4,14 @@ import { fileURLToPath } from "node:url";
 import { cert, getApps, initializeApp } from "firebase-admin/app";
 import { getAuth } from "firebase-admin/auth";
 import { getFirestore } from "firebase-admin/firestore";
+import { getStorage } from "firebase-admin/storage";
 
 const MODULE_DIR = path.dirname(fileURLToPath(import.meta.url));
 const BACKEND_ROOT = path.resolve(MODULE_DIR, "..");
 
 let firestoreDb = null;
 let authClient = null;
+let storageBucket = null;
 let firebaseInitError = "";
 let initialized = false;
 
@@ -26,6 +28,11 @@ export function getFirebaseAuth() {
 export function getFirebaseInitError() {
   ensureInitialized();
   return firebaseInitError;
+}
+
+export function getStorageBucket() {
+  ensureInitialized();
+  return storageBucket;
 }
 
 function ensureInitialized() {
@@ -46,11 +53,13 @@ function ensureInitialized() {
     if (!getApps().length) {
       initializeApp({
         credential: cert(serviceAccount),
+        storageBucket: (process.env.FIREBASE_STORAGE_BUCKET || "").trim() || undefined,
       });
     }
 
     firestoreDb = getFirestore();
     authClient = getAuth();
+    storageBucket = getStorage().bucket();
   } catch (error) {
     const detail = toErrorSummary(error);
     firebaseInitError = detail
@@ -58,6 +67,7 @@ function ensureInitialized() {
       : "Firebase Admin kunde inte startas. Kontrollera backend/.env och service account-filen.";
     firestoreDb = null;
     authClient = null;
+    storageBucket = null;
   }
 }
 

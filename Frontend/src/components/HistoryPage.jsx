@@ -16,15 +16,30 @@ const CATEGORY_OPTIONS = [
 const PAYMENT_OPTIONS = ["Autogiro", "E-faktura", "Bankgiro", "Plusgiro", "Kort", "Swish", "Okänt"];
 const CURRENCY_OPTIONS = ["SEK", "EUR", "USD"];
 const BILLING_OPTIONS = ["Abonnemang", "Engång", "Oklart"];
+const DEFAULT_HISTORY_FILTERS = {
+  vendor: "",
+  month: "all",
+  billingType: "all",
+  paidStatus: "all",
+  category: "all",
+};
+const PAID_STATUS_OPTIONS = [
+  { value: "all", label: "Alla" },
+  { value: "paid", label: "Betalda" },
+  { value: "unpaid", label: "Ej betalda" },
+];
 
 function HistoryCard({
   item,
   selectionMode,
   isSelected,
   busy,
+  deleteBusy,
   onToggleSelect,
   onDeleteOne,
   onOpenInvoice,
+  onTogglePaid,
+  onToggleBillingType,
 }) {
   const costText = formatAmountWithCurrency(item.totalAmount, item.currency || "SEK", {
     fallback: "Okänt belopp",
@@ -32,6 +47,7 @@ function HistoryCard({
   const dateText = item.dueDate || item.invoiceDate || "Okänt datum";
   const status = getStatusMeta(item);
   const billingType = getBillingTypeMeta(item);
+  const nextBillingType = getToggledBillingType(item?.billingType, item);
   const vendorName = cleanDisplayText(item.vendorName) || "Okänd leverantör";
   const category = normalizeCategory(cleanDisplayText(item.category));
 
@@ -63,7 +79,19 @@ function HistoryCard({
         <div>
           <h3>{vendorName}</h3>
           <p>{category}</p>
-          <span className={`history-billing-badge ${billingType.className}`}>{billingType.label}</span>
+          <button
+            type="button"
+            className={`history-billing-toggle history-billing-badge ${billingType.className}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onToggleBillingType(item);
+            }}
+            disabled={busy}
+            title={`Byt fakturatyp till ${nextBillingType}`}
+            aria-label={`Byt fakturatyp till ${nextBillingType}`}
+          >
+            {billingType.label}
+          </button>
         </div>
 
         <div className="history-card-actions">
@@ -80,13 +108,27 @@ function HistoryCard({
           <span className={`history-status ${status.className}`}>{status.label}</span>
 
           <button
+            type="button"
+            className={`history-paid-toggle ${item.paid ? "history-paid-toggle-active" : ""}`}
+            onClick={(event) => {
+              event.stopPropagation();
+              onTogglePaid(item);
+            }}
+            disabled={busy}
+            title={item.paid ? "Ångra betalmarkering" : "Markera fakturan som betald"}
+            aria-label={item.paid ? "Ångra betalmarkering" : "Markera fakturan som betald"}
+          >
+            {item.paid ? "Ångra betald" : "Markera betald"}
+          </button>
+
+          <button
             className="icon-danger-button"
             type="button"
             onClick={(event) => {
               event.stopPropagation();
               onDeleteOne(item.id);
             }}
-            disabled={busy}
+            disabled={deleteBusy}
             title="Ta bort post"
             aria-label="Ta bort post"
           >
@@ -106,7 +148,7 @@ function HistoryCard({
         </div>
         <div>
           <span>Källa</span>
-          <strong>{item.sourceType === "file" ? "Filuppladdning" : "Textinput"}</strong>
+          <strong>{getSourceTypeLabel(item)}</strong>
         </div>
         <div>
           <span>Analys</span>
@@ -365,12 +407,42 @@ export default function HistoryPage({ history }) {
   const [savingInvoice, setSavingInvoice] = useState(false);
   const [historyPreviewOpen, setHistoryPreviewOpen] = useState(false);
   const [historyPreviewFile, setHistoryPreviewFile] = useState(null);
+  const [optimisticUpdates, setOptimisticUpdates] = useState({});
+  const [pendingPaidTargets, setPendingPaidTargets] = useState({});
+  const [pendingBillingTypeTargets, setPendingBillingTypeTargets] = useState({});
+  const [paidUpdatingIds, setPaidUpdatingIds] = useState([]);
+  const [billingTypeUpdatingIds, setBillingTypeUpdatingIds] = useState([]);
+  const [filters, setFilters] = useState(DEFAULT_HISTORY_FILTERS);
   const [confirmState, setConfirmState] = useState({ open: false, type: "", targetId: "", count: 0, loading: false });
-  const busy = history.loading || history.mutating || savingInvoice || confirmState.loading;
+  const hasPendingToggleSave =
+    paidUpdatingIds.length > 0 ||
+    billingTypeUpdatingIds.length > 0 ||
+    Object.keys(pendingPaidTargets).length > 0 ||
+    Object.keys(pendingBillingTypeTargets).length > 0;
+  const busy = history.loading || savingInvoice || confirmState.loading;
+  const destructiveBusy = busy || history.mutating || hasPendingToggleSave;
 
-  const hasItems = history.items.length > 0;
+  const sortedItems = useMemo(() => sortHistoryItems(history.items), [history.items]);
+  const displayItems = useMemo(
+    () => sortedItems.map((item) => applyOptimisticUpdate(item, optimisticUpdates)),
+    [sortedItems, optimisticUpdates]
+  );
+  const hasItems = sortedItems.length > 0;
   const selectedCount = selectedIds.length;
   const selectedSet = useMemo(() => new Set(selectedIds), [selectedIds]);
+  const monthOptions = useMemo(() => getMonthFilterOptions(sortedItems), [sortedItems]);
+  const categoryFilterOptions = useMemo(() => getCategoryFilterOptions(sortedItems), [sortedItems]);
+  const filteredItems = useMemo(
+    () => displayItems.filter((item) => matchesHistoryFilters(item, filters)),
+    [displayItems, filters]
+  );
+  const filteredCount = filteredItems.length;
+  const hasFilteredItems = filteredCount > 0;
+  const hasActiveFilters = hasHistoryFilters(filters);
+  const inactiveCount = useMemo(
+    () => filteredItems.filter((item) => getStatusMeta(item).type === "overdue").length,
+    [filteredItems]
+  );
 
   useEffect(() => {
     if (!hasItems) {
@@ -380,12 +452,17 @@ export default function HistoryPage({ history }) {
       setDraftInvoice(null);
       setHistoryPreviewOpen(false);
       setHistoryPreviewFile(null);
+      setOptimisticUpdates({});
+      setPendingPaidTargets({});
+      setPendingBillingTypeTargets({});
+      setPaidUpdatingIds([]);
+      setBillingTypeUpdatingIds([]);
       setConfirmState({ open: false, type: "", targetId: "", count: 0, loading: false });
       return;
     }
 
-    setSelectedIds((previous) => previous.filter((id) => history.items.some((item) => item.id === id)));
-  }, [hasItems, history.items]);
+    setSelectedIds((previous) => previous.filter((id) => filteredItems.some((item) => item.id === id)));
+  }, [hasItems, filteredItems]);
 
   function toggleSelectionMode() {
     setSelectionMode((previous) => {
@@ -406,8 +483,209 @@ export default function HistoryPage({ history }) {
     });
   }
 
+  function togglePaid(item) {
+    if (!item?.id || busy) return;
+
+    const nextPaid = !item.paid;
+
+    setOptimisticUpdates((previous) => mergeOptimisticField(previous, item.id, "paid", nextPaid));
+    setPendingPaidTargets((previous) => ({
+      ...previous,
+      [item.id]: nextPaid,
+    }));
+
+    if (activeInvoice?.id === item.id) {
+      setActiveInvoice((previous) =>
+        previous?.id === item.id
+          ? {
+              ...previous,
+              paid: nextPaid,
+            }
+          : previous
+      );
+      setDraftInvoice((previous) =>
+        previous
+          ? {
+              ...previous,
+              paid: nextPaid,
+            }
+          : previous
+      );
+    }
+  }
+
+  function toggleBillingType(item) {
+    if (!item?.id || busy) return;
+
+    const nextBillingType = getToggledBillingType(item?.billingType, item);
+
+    setOptimisticUpdates((previous) =>
+      mergeOptimisticField(previous, item.id, "billingType", nextBillingType)
+    );
+    setPendingBillingTypeTargets((previous) => ({
+      ...previous,
+      [item.id]: nextBillingType,
+    }));
+
+    if (activeInvoice?.id === item.id) {
+      setActiveInvoice((previous) =>
+        previous?.id === item.id
+          ? {
+              ...previous,
+              billingType: nextBillingType,
+            }
+          : previous
+      );
+      setDraftInvoice((previous) =>
+        previous
+          ? {
+              ...previous,
+              billingType: nextBillingType,
+            }
+          : previous
+      );
+    }
+  }
+
+  /* eslint-disable react-hooks/exhaustive-deps */
+  async function persistPaidTarget({ id, item, targetPaid }) {
+    if (!id) return;
+
+    setPaidUpdatingIds((previous) => addUpdatingId(previous, id));
+    const payload = buildHistoryUpdatePayload(item, { paid: targetPaid });
+    const saved = await history.updateOne(id, payload);
+    setPaidUpdatingIds((previous) => removeUpdatingId(previous, id));
+
+    if (!saved) {
+      setPendingPaidTargets((previous) => {
+        const next = { ...previous };
+        delete next[id];
+        return next;
+      });
+      setOptimisticUpdates((previous) => clearOptimisticField(previous, id, "paid"));
+
+      const baseItem = history.items.find((entry) => entry.id === id);
+      if (activeInvoice?.id === id && baseItem) {
+        setActiveInvoice((previous) =>
+          previous?.id === id
+            ? {
+                ...previous,
+                paid: Boolean(baseItem.paid),
+              }
+            : previous
+        );
+        setDraftInvoice((previous) =>
+          previous
+            ? {
+                ...previous,
+                paid: Boolean(baseItem.paid),
+              }
+            : previous
+        );
+      }
+      return;
+    }
+
+    let shouldClear = false;
+    setPendingPaidTargets((previous) => {
+      if (previous[id] !== targetPaid) return previous;
+      const next = { ...previous };
+      delete next[id];
+      shouldClear = true;
+      return next;
+    });
+
+    if (shouldClear) {
+      setOptimisticUpdates((previous) => clearOptimisticField(previous, id, "paid"));
+    }
+  }
+
+  async function persistBillingTypeTarget({ id, item, targetBillingType }) {
+    if (!id) return;
+
+    setBillingTypeUpdatingIds((previous) => addUpdatingId(previous, id));
+    const payload = buildHistoryUpdatePayload(item, { billingType: targetBillingType });
+    const saved = await history.updateOne(id, payload);
+    setBillingTypeUpdatingIds((previous) => removeUpdatingId(previous, id));
+
+    if (!saved) {
+      setPendingBillingTypeTargets((previous) => {
+        const next = { ...previous };
+        delete next[id];
+        return next;
+      });
+      setOptimisticUpdates((previous) => clearOptimisticField(previous, id, "billingType"));
+
+      const baseItem = history.items.find((entry) => entry.id === id);
+      if (activeInvoice?.id === id && baseItem) {
+        const billingType = normalizeBillingType(baseItem.billingType, baseItem);
+        setActiveInvoice((previous) =>
+          previous?.id === id
+            ? {
+                ...previous,
+                billingType,
+              }
+            : previous
+        );
+        setDraftInvoice((previous) =>
+          previous
+            ? {
+                ...previous,
+                billingType,
+              }
+            : previous
+        );
+      }
+      return;
+    }
+
+    let shouldClear = false;
+    setPendingBillingTypeTargets((previous) => {
+      if (previous[id] !== targetBillingType) return previous;
+      const next = { ...previous };
+      delete next[id];
+      shouldClear = true;
+      return next;
+    });
+
+    if (shouldClear) {
+      setOptimisticUpdates((previous) => clearOptimisticField(previous, id, "billingType"));
+    }
+  }
+
+  useEffect(() => {
+    Object.entries(pendingPaidTargets).forEach(([id, target]) => {
+      if (paidUpdatingIds.includes(id)) return;
+
+      const item = displayItems.find((entry) => entry.id === id);
+      if (!item) return;
+
+      void persistPaidTarget({
+        id,
+        item,
+        targetPaid: Boolean(target),
+      });
+    });
+  }, [pendingPaidTargets, paidUpdatingIds, displayItems, persistPaidTarget]);
+
+  useEffect(() => {
+    Object.entries(pendingBillingTypeTargets).forEach(([id, target]) => {
+      if (billingTypeUpdatingIds.includes(id)) return;
+
+      const item = displayItems.find((entry) => entry.id === id);
+      if (!item) return;
+
+      void persistBillingTypeTarget({
+        id,
+        item,
+        targetBillingType: String(target || "Oklart"),
+      });
+    });
+  }, [pendingBillingTypeTargets, billingTypeUpdatingIds, displayItems, persistBillingTypeTarget]);
+  /* eslint-enable react-hooks/exhaustive-deps */
+
   function requestDeleteOne(id) {
-    if (!id || busy) return;
+    if (!id || destructiveBusy) return;
     setConfirmState({
       open: true,
       type: "one",
@@ -418,7 +696,7 @@ export default function HistoryPage({ history }) {
   }
 
   function requestDeleteSelected() {
-    if (!selectedIds.length || busy) return;
+    if (!selectedIds.length || destructiveBusy) return;
     setConfirmState({
       open: true,
       type: "selected",
@@ -429,12 +707,12 @@ export default function HistoryPage({ history }) {
   }
 
   function requestDeleteAll() {
-    if (busy || !hasItems) return;
+    if (destructiveBusy || !hasItems) return;
     setConfirmState({
       open: true,
       type: "all",
       targetId: "",
-      count: history.items.length,
+      count: sortedItems.length,
       loading: false,
     });
   }
@@ -539,6 +817,14 @@ export default function HistoryPage({ history }) {
     });
   }
 
+  function updateFilter(fieldKey, value) {
+    setFilters((previous) => ({ ...previous, [fieldKey]: value }));
+  }
+
+  function resetFilters() {
+    setFilters(DEFAULT_HISTORY_FILTERS);
+  }
+
   async function saveDraftInvoice() {
     if (!activeInvoice || !draftInvoice || savingInvoice) return;
 
@@ -556,22 +842,118 @@ export default function HistoryPage({ history }) {
     <>
       <section className="panel panel-history">
         <div className="history-header">
-          <div>
-            <h2>Historik</h2>
+          <div className="history-header-copy">
+            <div className="history-heading-row">
+              <h2>Historik</h2>
+              <span className="history-total-badge">Totalt {sortedItems.length} fakturor</span>
+              {hasActiveFilters ? (
+                <span className="history-total-badge history-total-badge-muted">Visar {filteredCount}</span>
+              ) : null}
+            </div>
             <p>Här ser du tidigare analyserade fakturor med nyckelinfo.</p>
           </div>
 
           <div className="history-header-actions">
-            <button className="btn btn-secondary" onClick={history.loadHistory} disabled={busy}>
+            <button className="btn btn-secondary" onClick={history.loadHistory} disabled={destructiveBusy}>
               {history.loading ? "Uppdaterar..." : "Uppdatera"}
             </button>
             {hasItems && (
-              <button className="btn btn-secondary" onClick={toggleSelectionMode} disabled={busy}>
+              <button className="btn btn-secondary" onClick={toggleSelectionMode} disabled={destructiveBusy}>
                 {selectionMode ? "Avsluta markering" : "Välj flera"}
               </button>
             )}
           </div>
         </div>
+
+        {hasItems && (
+          <div className="history-filter-toolbar">
+            <div className="history-filter-grid">
+              <label className="history-filter-field">
+                Företag
+                <input
+                  className="metric-input"
+                  value={filters.vendor}
+                  onChange={(event) => updateFilter("vendor", event.target.value)}
+                  placeholder="Sök leverantör"
+                />
+              </label>
+
+              <label className="history-filter-field">
+                Månad
+                <select
+                  className="metric-input"
+                  value={filters.month}
+                  onChange={(event) => updateFilter("month", event.target.value)}
+                >
+                  <option value="all">Alla månader</option>
+                  {monthOptions.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="history-filter-field">
+                Fakturatyp
+                <select
+                  className="metric-input"
+                  value={filters.billingType}
+                  onChange={(event) => updateFilter("billingType", event.target.value)}
+                >
+                  <option value="all">Alla typer</option>
+                  {BILLING_OPTIONS.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="history-filter-field">
+                Betalstatus
+                <select
+                  className="metric-input"
+                  value={filters.paidStatus}
+                  onChange={(event) => updateFilter("paidStatus", event.target.value)}
+                >
+                  {PAID_STATUS_OPTIONS.map((option) => (
+                    <option key={option.value} value={option.value}>
+                      {option.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+
+              <label className="history-filter-field">
+                Kategori
+                <select
+                  className="metric-input"
+                  value={filters.category}
+                  onChange={(event) => updateFilter("category", event.target.value)}
+                >
+                  <option value="all">Alla kategorier</option>
+                  {categoryFilterOptions.map((option) => (
+                    <option key={option} value={option}>
+                      {option}
+                    </option>
+                  ))}
+                </select>
+              </label>
+            </div>
+
+            <div className="history-filter-meta">
+              <p>
+                Visar {filteredCount} av {sortedItems.length} fakturor.
+              </p>
+              {hasActiveFilters ? (
+                <button className="btn btn-secondary" onClick={resetFilters} disabled={busy}>
+                  Rensa filter
+                </button>
+              ) : null}
+            </div>
+          </div>
+        )}
 
         {selectionMode && hasItems && (
           <div className="history-bulk-toolbar">
@@ -580,14 +962,21 @@ export default function HistoryPage({ history }) {
               <button
                 className="btn btn-secondary"
                 onClick={requestDeleteSelected}
-                disabled={!selectedCount || busy}
+                disabled={!selectedCount || destructiveBusy}
               >
                 Ta bort markerade
               </button>
-              <button className="btn btn-danger" onClick={requestDeleteAll} disabled={busy}>
+              <button className="btn btn-danger" onClick={requestDeleteAll} disabled={destructiveBusy}>
                 Ta bort alla
               </button>
             </div>
+          </div>
+        )}
+
+        {inactiveCount > 0 && (
+          <div className="history-warning-box" role="status">
+            <strong>Varning:</strong> {inactiveCount} inaktiv
+            {inactiveCount > 1 ? "a fakturor behöver" : " faktura behöver"} dubbelkoll.
           </div>
         )}
 
@@ -599,22 +988,29 @@ export default function HistoryPage({ history }) {
           </p>
         )}
 
-        {history.enabled && history.items.length === 0 && !history.loading && (
+        {history.enabled && sortedItems.length === 0 && !history.loading && (
           <p className="placeholder-text">Ingen historik ännu. Kör en analys så sparas första posten.</p>
         )}
 
-        {history.items.length > 0 && (
+        {hasItems && !hasFilteredItems && (
+          <p className="placeholder-text">Inga fakturor matchar dina filter just nu.</p>
+        )}
+
+        {hasFilteredItems && (
           <div className="history-list">
-            {history.items.map((item) => (
+            {filteredItems.map((item) => (
               <HistoryCard
                 key={item.id}
                 item={item}
                 selectionMode={selectionMode}
                 isSelected={selectedSet.has(item.id)}
                 busy={busy}
+                deleteBusy={destructiveBusy}
                 onToggleSelect={toggleSelectedId}
                 onDeleteOne={requestDeleteOne}
                 onOpenInvoice={openInvoice}
+                onTogglePaid={togglePaid}
+                onToggleBillingType={toggleBillingType}
               />
             ))}
           </div>
@@ -651,6 +1047,18 @@ export default function HistoryPage({ history }) {
 }
 
 function getStatusMeta(item) {
+  const statusText = normalizeText(item?.status);
+
+  if (Boolean(item?.paid) || statusText.includes("betald")) {
+    return {
+      type: "paid",
+      label: "Betald",
+      className: "history-status-ok history-status-paid",
+      sortGroup: 0,
+      sortWeight: 2,
+    };
+  }
+
   const dueDate = parseDate(item?.dueDate);
   if (dueDate) {
     const now = new Date();
@@ -658,32 +1066,265 @@ function getStatusMeta(item) {
     const diffDays = Math.ceil((dueDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24));
 
     if (diffDays < 0) {
-      return { label: "Förfallen", className: "history-status-danger" };
+      return {
+        type: "overdue",
+        label: "Förfallen",
+        className: "history-status-danger",
+        sortGroup: 2,
+        sortWeight: 0,
+      };
     }
     if (diffDays <= 7) {
-      return { label: "Förfaller snart", className: "history-status-warn" };
+      return {
+        type: "soon",
+        label: "Förfaller snart",
+        className: "history-status-warn",
+        sortGroup: 0,
+        sortWeight: 1,
+      };
     }
-    return { label: "Aktiv", className: "history-status-ok" };
+    return {
+      type: "active",
+      label: "Aktiv",
+      className: "history-status-ok",
+      sortGroup: 0,
+      sortWeight: 0,
+    };
   }
 
-  const statusText = normalizeText(item?.status);
   if (statusText.includes("forfallen")) {
-    return { label: "Förfallen", className: "history-status-danger" };
+    return {
+      type: "overdue",
+      label: "Förfallen",
+      className: "history-status-danger",
+      sortGroup: 2,
+      sortWeight: 0,
+    };
   }
   if (statusText.includes("forfaller") || statusText.includes("snart")) {
-    return { label: "Förfaller snart", className: "history-status-warn" };
+    return {
+      type: "soon",
+      label: "Förfaller snart",
+      className: "history-status-warn",
+      sortGroup: 0,
+      sortWeight: 1,
+    };
   }
   if (statusText.includes("aktiv")) {
-    return { label: "Aktiv", className: "history-status-ok" };
+    return {
+      type: "active",
+      label: "Aktiv",
+      className: "history-status-ok",
+      sortGroup: 0,
+      sortWeight: 0,
+    };
   }
-  return { label: "Okänt", className: "" };
+  return {
+    type: "unknown",
+    label: "Okänt",
+    className: "",
+    sortGroup: 1,
+    sortWeight: 0,
+  };
 }
 
 function parseDate(value) {
   if (!value) return null;
-  const date = new Date(`${value}T00:00:00`);
-  if (Number.isNaN(date.getTime())) return null;
-  return date;
+  const text = String(value).trim();
+  if (!text) return null;
+
+  if (/^\d{4}-\d{2}-\d{2}$/.test(text)) {
+    const localDate = new Date(`${text}T00:00:00`);
+    return Number.isNaN(localDate.getTime()) ? null : localDate;
+  }
+
+  const date = new Date(text);
+  return Number.isNaN(date.getTime()) ? null : date;
+}
+
+function sortHistoryItems(items = []) {
+  return [...items].sort((a, b) => {
+    const statusA = getStatusMeta(a);
+    const statusB = getStatusMeta(b);
+
+    if (statusA.sortGroup !== statusB.sortGroup) {
+      return statusA.sortGroup - statusB.sortGroup;
+    }
+
+    if (statusA.sortWeight !== statusB.sortWeight) {
+      return statusA.sortWeight - statusB.sortWeight;
+    }
+
+    const timeA = resolveSortTimestamp(a);
+    const timeB = resolveSortTimestamp(b);
+
+    if (statusA.type === "overdue") {
+      return timeA - timeB;
+    }
+    return timeB - timeA;
+  });
+}
+
+function resolveSortTimestamp(item) {
+  const candidates = [item?.invoiceDate, item?.dueDate, item?.createdAt, item?.scannedAt];
+  for (const value of candidates) {
+    const date = parseDate(value);
+    if (date) return date.getTime();
+  }
+  return 0;
+}
+
+function applyOptimisticUpdate(item, optimisticUpdates = {}) {
+  if (!item?.id) return item;
+  const patch = optimisticUpdates[item.id];
+  if (!patch || typeof patch !== "object") return item;
+  return { ...item, ...patch };
+}
+
+function addUpdatingId(previous = [], id = "") {
+  if (!id || previous.includes(id)) return previous;
+  return [...previous, id];
+}
+
+function removeUpdatingId(previous = [], id = "") {
+  if (!id) return previous;
+  return previous.filter((entry) => entry !== id);
+}
+
+function mergeOptimisticField(previous = {}, id = "", fieldKey = "", value) {
+  if (!id || !fieldKey) return previous;
+  const previousEntry = previous[id] || {};
+  return {
+    ...previous,
+    [id]: {
+      ...previousEntry,
+      [fieldKey]: value,
+    },
+  };
+}
+
+function clearOptimisticField(previous = {}, id = "", fieldKey = "") {
+  if (!id || !fieldKey) return previous;
+  const previousEntry = previous[id];
+  if (!previousEntry || !(fieldKey in previousEntry)) return previous;
+
+  const nextEntry = { ...previousEntry };
+  delete nextEntry[fieldKey];
+
+  if (Object.keys(nextEntry).length === 0) {
+    const next = { ...previous };
+    delete next[id];
+    return next;
+  }
+
+  return {
+    ...previous,
+    [id]: nextEntry,
+  };
+}
+
+function resolveHistoryDate(item) {
+  const candidates = [item?.invoiceDate, item?.dueDate, item?.createdAt, item?.scannedAt];
+  for (const value of candidates) {
+    const date = parseDate(value);
+    if (date) return date;
+  }
+  return null;
+}
+
+function resolveMonthKey(item) {
+  const date = resolveHistoryDate(item);
+  if (!date) return "";
+  const month = String(date.getMonth() + 1).padStart(2, "0");
+  return `${date.getFullYear()}-${month}`;
+}
+
+function formatMonthLabel(monthKey) {
+  const [yearText, monthText] = String(monthKey).split("-");
+  const year = Number(yearText);
+  const month = Number(monthText);
+  if (!Number.isFinite(year) || !Number.isFinite(month)) {
+    return String(monthKey);
+  }
+
+  const date = new Date(year, month - 1, 1);
+  if (Number.isNaN(date.getTime())) {
+    return String(monthKey);
+  }
+
+  const label = date.toLocaleDateString("sv-SE", { month: "long", year: "numeric" });
+  return label.charAt(0).toUpperCase() + label.slice(1);
+}
+
+function getMonthFilterOptions(items = []) {
+  const monthSet = new Set();
+  items.forEach((item) => {
+    const monthKey = resolveMonthKey(item);
+    if (monthKey) monthSet.add(monthKey);
+  });
+
+  return [...monthSet]
+    .sort((a, b) => b.localeCompare(a))
+    .map((monthKey) => ({
+      value: monthKey,
+      label: formatMonthLabel(monthKey),
+    }));
+}
+
+function getCategoryFilterOptions(items = []) {
+  const categorySet = new Set();
+  items.forEach((item) => {
+    categorySet.add(normalizeCategory(cleanDisplayText(item?.category)));
+  });
+
+  return [...categorySet].sort((a, b) => a.localeCompare(b, "sv"));
+}
+
+function hasHistoryFilters(filters = DEFAULT_HISTORY_FILTERS) {
+  return (
+    cleanDisplayText(filters.vendor).length > 0 ||
+    filters.month !== "all" ||
+    filters.billingType !== "all" ||
+    filters.paidStatus !== "all" ||
+    filters.category !== "all"
+  );
+}
+
+function matchesHistoryFilters(item, filters = DEFAULT_HISTORY_FILTERS) {
+  const vendorFilter = normalizeText(cleanDisplayText(filters.vendor));
+  if (vendorFilter) {
+    const vendorName = normalizeText(cleanDisplayText(item?.vendorName));
+    if (!vendorName.includes(vendorFilter)) {
+      return false;
+    }
+  }
+
+  if (filters.month !== "all" && resolveMonthKey(item) !== filters.month) {
+    return false;
+  }
+
+  if (filters.billingType !== "all") {
+    const billingType = normalizeBillingType(item?.billingType, item);
+    if (billingType !== filters.billingType) {
+      return false;
+    }
+  }
+
+  if (filters.paidStatus === "paid" && !item?.paid) {
+    return false;
+  }
+  if (filters.paidStatus === "unpaid" && item?.paid) {
+    return false;
+  }
+
+  if (filters.category !== "all") {
+    const category = normalizeCategory(cleanDisplayText(item?.category));
+    if (category !== filters.category) {
+      return false;
+    }
+  }
+
+  return true;
 }
 
 function normalizeText(value) {
@@ -709,6 +1350,35 @@ function toDraft(item) {
     vatAmount: formatNumberWithSpaces(item.vatAmount, { fallback: "" }),
     currency: cleanDisplayText(item.currency) || "SEK",
     paymentMethod: normalizePaymentMethod(cleanDisplayText(item.paymentMethod)),
+    paid: Boolean(item.paid),
+  };
+}
+
+function buildHistoryUpdatePayload(item, overrides = {}) {
+  const category = normalizeCategory(overrides.category ?? cleanDisplayText(item?.category));
+  const monthlyCost = toNumberOrNull(overrides.monthlyCost ?? item?.monthlyCost);
+  const totalAmount = toNumberOrNull(overrides.totalAmount ?? item?.totalAmount);
+
+  return {
+    vendorName: cleanDisplayText(overrides.vendorName ?? item?.vendorName),
+    category,
+    billingType: normalizeBillingType(overrides.billingType ?? item?.billingType, {
+      category,
+      monthlyCost,
+      totalAmount,
+    }),
+    invoiceDate: overrides.invoiceDate ?? item?.invoiceDate ?? null,
+    dueDate: overrides.dueDate ?? item?.dueDate ?? null,
+    invoiceNumber: cleanDisplayText(overrides.invoiceNumber ?? item?.invoiceNumber),
+    customerNumber: cleanDisplayText(overrides.customerNumber ?? item?.customerNumber),
+    ocrNumber: cleanDisplayText(overrides.ocrNumber ?? item?.ocrNumber),
+    organizationNumber: cleanDisplayText(overrides.organizationNumber ?? item?.organizationNumber),
+    monthlyCost,
+    totalAmount,
+    vatAmount: toNumberOrNull(overrides.vatAmount ?? item?.vatAmount),
+    currency: cleanDisplayText(overrides.currency ?? item?.currency) || "SEK",
+    paymentMethod: normalizePaymentMethod(overrides.paymentMethod ?? item?.paymentMethod),
+    paid: Boolean(overrides.paid ?? item?.paid),
   };
 }
 
@@ -796,6 +1466,7 @@ function normalizeDraft(draft) {
     vatAmount: toNumberOrNull(draft.vatAmount),
     currency: cleanDisplayText(draft.currency) || "SEK",
     paymentMethod: normalizePaymentMethod(draft.paymentMethod),
+    paid: Boolean(draft.paid),
   };
 }
 
@@ -845,6 +1516,16 @@ function normalizePaymentMethod(value) {
   return map[text] || "Okänt";
 }
 
+function getSourceTypeLabel(item) {
+  const source = normalizeText(cleanDisplayText(item?.source));
+  if (source === "email") return "E-post";
+
+  const sourceType = normalizeText(cleanDisplayText(item?.sourceType));
+  if (sourceType === "email") return "E-post";
+  if (sourceType === "file") return "Filuppladdning";
+  return "Textinput";
+}
+
 function getBillingTypeMeta(item) {
   const billingType = normalizeBillingType(item?.billingType, item);
   if (billingType === "Abonnemang") {
@@ -869,6 +1550,11 @@ function normalizeBillingType(value, context = {}) {
   }
 
   return inferBillingType(context);
+}
+
+function getToggledBillingType(value, context = {}) {
+  const current = normalizeBillingType(value, context);
+  return current === "Abonnemang" ? "Engång" : "Abonnemang";
 }
 
 function inferBillingType(context = {}) {

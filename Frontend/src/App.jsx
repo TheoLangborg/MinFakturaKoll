@@ -6,6 +6,7 @@ import AuthPage from "./components/AuthPage.jsx";
 import HeroSection from "./components/HeroSection.jsx";
 import HistoryPage from "./components/HistoryPage.jsx";
 import InvoiceInputPanel from "./components/InvoiceInputPanel.jsx";
+import ImportInboxBadge from "./components/ImportInboxBadge.jsx";
 import PreviewModal from "./components/PreviewModal.jsx";
 import ProfileMenu from "./components/ProfileMenu.jsx";
 import SavingsAnalysisPage from "./components/SavingsAnalysisPage.jsx";
@@ -24,7 +25,7 @@ export default function App() {
   const [session, setSession] = useState(null);
   const history = useInvoiceHistory({ enabled: Boolean(session) });
   const loadHistory = history.loadHistory;
-  const scanner = useInvoiceScanner({ onHistoryChanged: loadHistory });
+  const scanner = useInvoiceScanner({ onHistoryChanged: loadHistory, historyItems: history.items });
   const [activeView, setActiveView] = useState("scan");
   const identityLabel =
     String(session?.displayName || "").trim() || session?.email || "Inloggad användare";
@@ -130,7 +131,10 @@ export default function App() {
       <main className="app-shell">
         <HeroSection />
         <div className="session-bar">
-          <strong className="session-identity">{identityLabel}</strong>
+          <div className="session-main">
+            <strong className="session-identity">{identityLabel}</strong>
+            <ImportInboxBadge />
+          </div>
           <div className="session-actions">
             <ProfileMenu session={session} onLogout={handleLogout} />
           </div>
@@ -187,6 +191,8 @@ export default function App() {
                 onAnalyzeSelected={scanner.analyzeSelected}
                 onClear={scanner.clearAll}
                 onOpenPreview={scanner.openPreview}
+                duplicateCandidateCount={scanner.duplicateCandidateCount}
+                onAddDuplicateCandidates={scanner.addDuplicateItemsAnyway}
               />
 
               <AnalysisPanel

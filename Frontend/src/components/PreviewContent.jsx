@@ -8,6 +8,14 @@ export default function PreviewContent({ file, large = false }) {
   }
 
   if (file.previewKind === "pdf") {
+    if (!large) {
+      return (
+        <div className="preview-pdf-placeholder">
+          <strong>PDF vald</strong>
+          <span>Klicka för större förhandsvisning</span>
+        </div>
+      );
+    }
     return <iframe className={pdfClass} src={file.previewSrc} title={`PDF-förhandsvisning: ${file.name}`} />;
   }
 

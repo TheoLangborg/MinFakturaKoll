@@ -18,6 +18,7 @@ export default function SavingsPanel({ items = [] }) {
   const hasData = recurringEntries.length > 0;
   const summary = analysis.summary;
   const compareTargets = recurringEntries.slice(0, 30);
+  const monthDataCount = analysis.monthlyTotals.length;
 
   useEffect(() => {
     const validKeys = new Set(recurringEntries.map((entry) => entry.key));
@@ -138,6 +139,7 @@ export default function SavingsPanel({ items = [] }) {
       globalPotential,
       externalPotential,
       liveComparableCount,
+      positionDelta: currentRecurringMonthly - globalMarketMonthly,
     };
   }, [marketByKey, recurringEntries]);
 
@@ -204,9 +206,13 @@ export default function SavingsPanel({ items = [] }) {
   return (
     <section className="panel savings-panel">
       <div className="panel-header">
-        <span className="step-badge">Bonus</span>
+        <span className="step-badge">Analys</span>
         <h2>Sparanalys</h2>
       </div>
+
+      <p className="savings-intro-text">
+        Här ser du vad du betalar idag, vad marknaden ligger på och vad som faktiskt går att spara.
+      </p>
 
       {!hasData && (
         <p className="placeholder-text">
@@ -216,66 +222,106 @@ export default function SavingsPanel({ items = [] }) {
 
       {hasData && (
         <>
-          <div className="savings-summary-grid">
+          <div className="savings-summary-grid savings-summary-grid-compact">
+            <SummaryCard
+              label="Du betalar nu (återkommande/mån)"
+              value={formatAmountWithCurrency(marketOverview.currentRecurringMonthly, "SEK", {
+                fallback: "0 SEK",
+              })}
+              hint="Summan av alla återkommande kostnader senaste månaden."
+            />
+            <SummaryCard
+              label="Möjlig besparing mot marknad"
+              value={formatAmountWithCurrency(marketOverview.globalPotential, "SEK", {
+                fallback: "0 SEK",
+              })}
+              hint="Skillnad mellan din nivå och marknadsmedian."
+            />
+            <SummaryCard
+              label="Extern verifierad besparing"
+              value={
+                marketLoading
+                  ? "Hämtar..."
+                  : formatAmountWithCurrency(marketOverview.externalPotential, "SEK", {
+                      fallback: "0 SEK",
+                    })
+              }
+              hint="Besparing där live-data (extern källa) faktiskt kunde hämtas."
+            />
             <SummaryCard
               label="Uppskattad intern besparing/mån"
               value={formatAmountWithCurrency(summary.estimatedMonthlySaving, "SEK", {
                 fallback: "0 SEK",
               })}
+              hint="Beräknat utifrån din egen historik och prisförändring."
             />
-            <SummaryCard label="Återkommande tjänster" value={String(summary.recurringCount)} />
             <SummaryCard
               label="Återkommande leverantörer"
               value={String(summary.recurringVendorCount)}
+              hint="Leverantörer som återkommer över flera månader."
+            />
+            <SummaryCard
+              label="Återkommande tjänster"
+              value={String(summary.recurringCount)}
+              hint="Antal tjänster/abonnemang som identifierats som återkommande."
             />
             <SummaryCard
               label="Din markerade besparing"
               value={formatAmountWithCurrency(confirmedUnusedSaving, "SEK", {
                 fallback: "0 SEK",
               })}
+              hint="Potential baserad på tjänster du markerat som 'används inte längre'."
+            />
+            <SummaryCard
+              label="Månader med data"
+              value={String(monthDataCount)}
+              hint="Ju fler månader, desto säkrare trend- och sparanalys."
             />
           </div>
 
-          <section className="savings-market-overview">
-            <h3>Månadsöversikt mot global marknad</h3>
-            <p>
-              Så här ser din nuvarande kostnadsnivå ut jämfört med marknadsnivå baserat på extern
-              hämtning och referensdata.
-            </p>
-
-            <div className="savings-market-grid">
-              <SummaryCard
-                label="Du betalar nu (återkommande/mån)"
-                value={formatAmountWithCurrency(marketOverview.currentRecurringMonthly, "SEK", {
-                  fallback: "0 SEK",
-                })}
+          <section className="savings-field-guide">
+            <h3>Vad betyder fälten?</h3>
+            <div className="savings-field-guide-grid">
+              <FieldGuideItem
+                title="Du betalar nu"
+                text="Nuvarande månadsnivå för återkommande fakturor."
               />
-              <SummaryCard
-                label="Global marknadsnivå (median/mån)"
-                value={formatAmountWithCurrency(marketOverview.globalMarketMonthly, "SEK", {
-                  fallback: "0 SEK",
-                })}
+              <FieldGuideItem
+                title="Global marknadsnivå"
+                text="Marknadsmedian från extern hämtning och referensnivåer."
               />
-              <SummaryCard
-                label="Möjlig besparing mot marknad"
-                value={formatAmountWithCurrency(marketOverview.globalPotential, "SEK", {
-                  fallback: "0 SEK",
-                })}
+              <FieldGuideItem
+                title="Möjlig besparing"
+                text="Din kostnad minus marknadsnivå. Negativ skillnad visas som 0."
               />
-              <SummaryCard
-                label="Extern verifierad besparing"
-                value={
-                  marketLoading
-                    ? "Hämtar..."
-                    : formatAmountWithCurrency(marketOverview.externalPotential, "SEK", {
-                        fallback: "0 SEK",
-                      })
-                }
+              <FieldGuideItem
+                title="Extern verifierad"
+                text="Del av besparingen där live-källa kunde bekräfta prisnivån."
               />
             </div>
+          </section>
 
+          <section className="savings-market-overview">
+            <h3>Jämförelse mot marknaden</h3>
+            <p>
+              Du betalar{" "}
+              <strong>
+                {formatAmountWithCurrency(marketOverview.currentRecurringMonthly, "SEK", {
+                  fallback: "0 SEK",
+                })}
+              </strong>{" "}
+              per månad. Marknadsmedian ligger på{" "}
+              <strong>
+                {formatAmountWithCurrency(marketOverview.globalMarketMonthly, "SEK", {
+                  fallback: "0 SEK",
+                })}
+              </strong>
+              .
+            </p>
             <p className="savings-market-meta">
-              Live-källor träffade på {marketOverview.liveComparableCount} tjänster.
+              Skillnad:{" "}
+              <strong>{formatSignedAmount(marketOverview.positionDelta)}</strong> • Live-källor
+              träffade på {marketOverview.liveComparableCount} tjänster.
             </p>
           </section>
 
@@ -529,11 +575,21 @@ export default function SavingsPanel({ items = [] }) {
   );
 }
 
-function SummaryCard({ label, value }) {
+function SummaryCard({ label, value, hint }) {
   return (
     <article className="savings-summary-card">
       <p>{label}</p>
       <strong>{value}</strong>
+      {hint ? <span className="savings-summary-hint">{hint}</span> : null}
+    </article>
+  );
+}
+
+function FieldGuideItem({ title, text }) {
+  return (
+    <article className="savings-field-guide-item">
+      <strong>{title}</strong>
+      <p>{text}</p>
     </article>
   );
 }
@@ -678,6 +734,12 @@ function formatSignedPercent(value) {
   if (!Number.isFinite(value)) return "-";
   const prefix = value > 0 ? "+" : "";
   return `${prefix}${formatNumberWithSpaces(value, { fallback: "0" })}%`;
+}
+
+function formatSignedAmount(value) {
+  if (!Number.isFinite(value)) return "-";
+  const prefix = value > 0 ? "+" : "";
+  return `${prefix}${formatAmountWithCurrency(value, "SEK", { fallback: "0 SEK" })}`;
 }
 
 function formatProviderLabel(provider) {

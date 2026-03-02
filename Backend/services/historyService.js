@@ -11,9 +11,12 @@ export async function saveHistoryEntry({
   extracted,
   analysisMode = "unknown",
   sourceType = "text",
+  source = "",
   fileName = "",
   filePayload = null,
   sourceText = "",
+  fileSha256 = "",
+  emailMeta = null,
 }) {
   const db = getFirestoreDb();
   if (!db) {
@@ -34,9 +37,12 @@ export async function saveHistoryEntry({
     extracted,
     analysisMode,
     sourceType,
+    source,
     fileName,
     filePayload,
     sourceText,
+    fileSha256,
+    emailMeta,
   });
 
   const docRef = await getCollectionRef(db).add({
@@ -69,6 +75,8 @@ export async function listHistoryEntries(userId, limit = 40) {
   const items = docs
     .map((doc) => {
       const data = doc.data() || {};
+      const source = resolveHistorySource(data.source, data.sourceType);
+      const sourceType = normalizeHistorySourceType(data.sourceType, source);
       return {
         id: doc.id,
         vendorName: data.vendorName || "",
@@ -89,11 +97,19 @@ export async function listHistoryEntries(userId, limit = 40) {
         ocrNumber: data.ocrNumber || "",
         vatAmount: data.vatAmount ?? null,
         paymentMethod: data.paymentMethod || "",
-        status: data.status || inferStatus(data.dueDate),
+        status: inferStatus(data.dueDate, Boolean(data.paid)),
+        paid: Boolean(data.paid),
+        paidAt:
+          typeof data.paidAt?.toDate === "function"
+            ? data.paidAt.toDate().toISOString()
+            : null,
         confidence: data.confidence ?? null,
-        sourceType: data.sourceType || "text",
+        source,
+        sourceType,
         fileName: data.fileName || "",
-        filePreview: normalizeStoredFilePreview(data.filePreview, data.fileName, data.sourceType),
+        fileSha256: data.fileSha256 || "",
+        emailMeta: normalizeEmailMeta(data.emailMeta),
+        filePreview: normalizeStoredFilePreview(data.filePreview, data.fileName, sourceType),
         scannedAt: data.scannedAt || null,
         createdAt:
           typeof data.createdAt?.toDate === "function"
@@ -145,11 +161,14 @@ export async function updateHistoryEntry(userId, id, extracted = {}) {
   }
 
   const dueDate = extracted?.dueDate || null;
+  const paid = Boolean(extracted?.paid ?? existingData.paid);
   const billingType = normalizeBillingType(extracted?.billingType ?? existingData.billingType, {
     category: extracted?.category ?? existingData.category,
     monthlyCost: extracted?.monthlyCost ?? existingData.monthlyCost,
     totalAmount: extracted?.totalAmount ?? existingData.totalAmount,
   });
+  const wasPaid = Boolean(existingData.paid);
+  const nextPaidAt = paid ? (wasPaid ? existingData.paidAt || null : FieldValue.serverTimestamp()) : null;
   await docRef.set(
     {
       vendorName: extracted?.vendorName || "",
@@ -166,8 +185,10 @@ export async function updateHistoryEntry(userId, id, extracted = {}) {
       ocrNumber: extracted?.ocrNumber || "",
       vatAmount: extracted?.vatAmount ?? null,
       paymentMethod: extracted?.paymentMethod || "",
+      paid,
+      paidAt: nextPaidAt,
       confidence: extracted?.confidence ?? null,
-      status: inferStatus(dueDate),
+      status: inferStatus(dueDate, paid),
       updatedAt: FieldValue.serverTimestamp(),
     },
     { merge: true }
@@ -298,11 +319,17 @@ function buildHistoryPayload({
   extracted = {},
   analysisMode,
   sourceType,
+  source,
   fileName,
   filePayload,
   sourceText,
+  fileSha256,
+  emailMeta,
 }) {
   const dueDate = extracted?.dueDate || null;
+  const paid = Boolean(extracted?.paid);
+  const resolvedSource = resolveHistorySource(source, sourceType);
+  const resolvedSourceType = normalizeHistorySourceType(sourceType, resolvedSource);
   return {
     userId,
     vendorName: extracted?.vendorName || "",
@@ -323,17 +350,28 @@ function buildHistoryPayload({
     ocrNumber: extracted?.ocrNumber || "",
     vatAmount: extracted?.vatAmount ?? null,
     paymentMethod: extracted?.paymentMethod || "",
+    paid,
+    paidAt: paid ? FieldValue.serverTimestamp() : null,
     confidence: extracted?.confidence ?? null,
-    status: inferStatus(dueDate),
-    sourceType,
+    status: inferStatus(dueDate, paid),
+    source: resolvedSource,
+    sourceType: resolvedSourceType,
     fileName,
-    filePreview: buildHistoryFilePreview({ sourceType, fileName, filePayload, sourceText }),
+    fileSha256: String(fileSha256 || "").trim().toLowerCase(),
+    emailMeta: normalizeEmailMeta(emailMeta),
+    filePreview: buildHistoryFilePreview({
+      sourceType: resolvedSourceType,
+      fileName,
+      filePayload,
+      sourceText,
+    }),
     analysisMode,
     scannedAt: new Date().toISOString(),
   };
 }
 
-function inferStatus(dueDate) {
+function inferStatus(dueDate, paid = false) {
+  if (paid) return "Betald";
   if (!dueDate) return "Okänt";
   const due = new Date(`${dueDate}T00:00:00`);
   if (Number.isNaN(due.getTime())) return "Okänt";
@@ -418,7 +456,7 @@ function buildHistoryFilePreview({ sourceType, fileName, filePayload, sourceText
   const dataUrl = typeof filePayload?.dataUrl === "string" ? filePayload.dataUrl.trim() : "";
   const fileType = String(filePayload?.type || "").trim().toLowerCase();
 
-  if (safeSourceType === "file") {
+  if (safeSourceType === "file" || safeSourceType === "email") {
     const previewKind = inferPreviewKind(fileType, safeFileName);
     if ((previewKind === "image" || previewKind === "pdf") && dataUrl.startsWith("data:")) {
       if (dataUrl.length <= MAX_PREVIEW_DATA_URL_LENGTH) {
@@ -498,6 +536,51 @@ function normalizeStoredFilePreview(rawPreview, fileName, sourceType) {
   };
 }
 
+function resolveHistorySource(value, sourceType) {
+  const source = String(value || "").trim().toLowerCase();
+  if (source === "email" || source === "upload" || source === "scan" || source === "text") {
+    return source;
+  }
+
+  const type = normalizeHistorySourceType(sourceType, "");
+  if (type === "email") return "email";
+  if (type === "file") return "upload";
+  if (type === "text") return "text";
+  return "scan";
+}
+
+function normalizeHistorySourceType(value, source = "") {
+  const type = String(value || "").trim().toLowerCase();
+  if (type === "email" || type === "file" || type === "text") {
+    return type;
+  }
+
+  const safeSource = String(source || "").trim().toLowerCase();
+  if (safeSource === "email") return "email";
+  if (safeSource === "upload") return "file";
+  return "text";
+}
+
+function normalizeEmailMeta(value) {
+  if (!value || typeof value !== "object") return null;
+
+  const from = String(value.from || "").trim();
+  const subject = String(value.subject || "").trim();
+  const recipient = String(value.recipient || "").trim();
+  const receivedAt = String(value.receivedAt || "").trim();
+
+  if (!from && !subject && !recipient && !receivedAt) {
+    return null;
+  }
+
+  return {
+    from,
+    subject,
+    recipient,
+    receivedAt,
+  };
+}
+
 function inferPreviewKind(fileType, fileName) {
   if (fileType.startsWith("image/")) return "image";
   if (fileType === "application/pdf") return "pdf";
@@ -543,3 +626,4 @@ async function loadUserHistoryDocs(db, userId, safeLimit) {
     };
   }
 }
+

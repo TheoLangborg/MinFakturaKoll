@@ -17,13 +17,15 @@ export default function SavingsAnalysisPage({ history }) {
 
   return (
     <>
+      <SavingsPanel items={history.items} />
+
       <section className="panel panel-savings-page">
         <div className="history-header">
           <div>
             <h2>Potentiella Besparingar</h2>
             <p>
-              Djupare analys av återkommande kostnader, månadstrender och var du kan sänka
-              utgifterna snabbast.
+              Här får du en samlad översikt av läget: hur kostnaden utvecklas över tid och var
+              besparingspotentialen är störst.
             </p>
           </div>
 
@@ -65,33 +67,40 @@ export default function SavingsAnalysisPage({ history }) {
                     })}`
                   : "Saknas"
               }
+              hint="Din senaste registrerade månad i historiken."
+            />
+            <SummaryCard
+              label="Förändring senaste månad"
+              value={latestDelta == null ? "-" : formatSignedAmount(latestDelta)}
+              hint="Skillnaden mot månaden innan."
             />
             <SummaryCard
               label="Snitt per månad"
               value={formatAmountWithCurrency(averageSpend, "SEK", {
                 fallback: "0 SEK",
               })}
+              hint="Genomsnittlig månadskostnad över hela historiken."
             />
             <SummaryCard
               label="Total spend i historik"
               value={formatAmountWithCurrency(totalSpend, "SEK", {
                 fallback: "0 SEK",
               })}
+              hint="Summan av alla månader med data."
             />
-            <SummaryCard label="Månader med data" value={String(monthCount)} />
             <SummaryCard
               label="Återkommande leverantörer"
               value={String(analysis.recurringByVendor.length)}
+              hint="Leverantörer som återkommer över flera månader."
             />
             <SummaryCard
-              label="Förändring senaste månad"
-              value={latestDelta == null ? "-" : formatSignedAmount(latestDelta)}
+              label="Månader med data"
+              value={String(monthCount)}
+              hint="Används för att bedöma analysens stabilitet."
             />
           </div>
         ) : null}
       </section>
-
-      {hasItems ? <SavingsPanel items={history.items} /> : null}
 
       {hasRecurring ? (
         <section className="panel panel-savings-deepdive">
@@ -155,8 +164,8 @@ export default function SavingsAnalysisPage({ history }) {
                   <th>Leverantör</th>
                   <th>Kategori</th>
                   <th>Månader</th>
-                  <th>Förra Kostnad</th>
-                  <th>Senaste Kostnad</th>
+                  <th>Förra kostnad</th>
+                  <th>Senaste kostnad</th>
                   <th>Trend</th>
                   <th>Sparpotential</th>
                   <th>Prioritet</th>
@@ -212,11 +221,12 @@ function priorityLabel(status) {
   return "Låg";
 }
 
-function SummaryCard({ label, value }) {
+function SummaryCard({ label, value, hint }) {
   return (
     <article className="savings-summary-card">
       <p>{label}</p>
       <strong>{value}</strong>
+      {hint ? <span className="savings-summary-hint">{hint}</span> : null}
     </article>
   );
 }

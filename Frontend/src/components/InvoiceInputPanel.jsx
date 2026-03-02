@@ -1,3 +1,4 @@
+import { useEffect, useRef, useState } from "react";
 import { ACCEPTED_FILE_TYPES } from "../constants/appConstants.js";
 import { formatFileSize } from "../utils/fileUtils.js";
 import PreviewContent from "./PreviewContent.jsx";
@@ -24,6 +25,7 @@ export default function InvoiceInputPanel({
   error,
   warning,
   loading,
+  duplicateCandidateCount = 0,
   onTextChange,
   onFileChange,
   onDragOver,
@@ -36,12 +38,15 @@ export default function InvoiceInputPanel({
   onSelectQueueItem,
   onShowQueueItemResult,
   onRemoveQueueItem,
+  onAddDuplicateCandidates,
 }) {
   const hasFilePreview = Boolean(invoiceFile?.previewKind);
   const fileInputId = "invoice-upload-input";
   const activeQueueItem = queueItems.find((item) => item.id === activeQueueItemId) || null;
   const selectedQueueItem = queueItems.find((item) => item.id === selectedQueueItemId) || null;
   const selectedIndex = queueItems.findIndex((item) => item.id === selectedQueueItemId);
+  const [queueExpanded, setQueueExpanded] = useState(true);
+  const previousBatchCompleteRef = useRef(false);
   const queueSummary = queueProgress || {
     total: queueItems.length,
     done: 0,
@@ -50,6 +55,32 @@ export default function InvoiceInputPanel({
     pending: queueItems.length,
   };
   const canAnalyzeSelected = Boolean(selectedQueueItem) && selectedQueueItem.status !== "processing";
+
+  /* eslint-disable react-hooks/set-state-in-effect */
+  useEffect(() => {
+    if (!queueItems.length) {
+      setQueueExpanded(true);
+      previousBatchCompleteRef.current = false;
+      return;
+    }
+
+    const becameComplete = isQueueBatchComplete && !previousBatchCompleteRef.current;
+    if (becameComplete) {
+      setQueueExpanded(false);
+    }
+
+    if (queueSummary.processing > 0 || queueSummary.pending > 0) {
+      setQueueExpanded(true);
+    }
+
+    previousBatchCompleteRef.current = isQueueBatchComplete;
+  }, [
+    isQueueBatchComplete,
+    queueItems.length,
+    queueSummary.pending,
+    queueSummary.processing,
+  ]);
+  /* eslint-enable react-hooks/set-state-in-effect */
 
   return (
     <article className="panel">
@@ -125,76 +156,89 @@ export default function InvoiceInputPanel({
       {queueItems.length > 0 && (
         <div className="upload-queue">
           <div className="upload-queue-header">
-            <strong>
-              Analyskö {queueSummary.total}/{maxQueueFiles}
-            </strong>
+            <button
+              className="upload-queue-toggle"
+              type="button"
+              onClick={() => setQueueExpanded((previous) => !previous)}
+              aria-expanded={queueExpanded}
+              aria-label={queueExpanded ? "Dölj analyskö" : "Visa analyskö"}
+            >
+              <span className="upload-queue-toggle-icon" aria-hidden="true">
+                {queueExpanded ? "v" : ">"}
+              </span>
+              <strong>
+                Analyskö {queueSummary.total}/{maxQueueFiles}
+              </strong>
+            </button>
             <span>
               {queueSummary.done} analyserade • {queueSummary.pending} väntar
               {queueSummary.failed > 0 ? ` • ${queueSummary.failed} fel` : ""}
             </span>
           </div>
 
-          {activeQueueItem && (
+          {queueExpanded && activeQueueItem && (
             <p className="upload-queue-active">Analyserar nu: {activeQueueItem.file.name}</p>
           )}
 
-          <div className="upload-queue-list">
-            {queueItems.map((item) => {
-              const status = STATUS_META[item.status] || { label: "Okänd", icon: "?" };
-              const isDone = item.status === "done" && Boolean(item.result);
+          {queueExpanded && (
+            <div className="upload-queue-list">
+              {queueItems.map((item) => {
+                const status = STATUS_META[item.status] || { label: "Okänd", icon: "?" };
+                const isDone = item.status === "done" && Boolean(item.result);
 
-              return (
-                <article
-                  key={item.id}
-                  className={`upload-queue-item ${
-                    item.id === selectedQueueItemId ? "upload-queue-item-selected" : ""
-                  } ${item.id === activeQueueItemId ? "upload-queue-item-active" : ""}`}
-                  onClick={() => onSelectQueueItem(item.id)}
-                >
-                  <div className="upload-queue-main">
-                    <p className="upload-queue-name">{item.file.name}</p>
-                    <p className="upload-queue-meta">{formatFileSize(item.file.size)}</p>
-                    {item.status === "error" && item.error && (
-                      <p className="upload-queue-error">{item.error}</p>
-                    )}
-                  </div>
+                return (
+                  <article
+                    key={item.id}
+                    className={`upload-queue-item ${
+                      item.id === selectedQueueItemId ? "upload-queue-item-selected" : ""
+                    } ${item.id === activeQueueItemId ? "upload-queue-item-active" : ""}`}
+                    onClick={() => onSelectQueueItem(item.id)}
+                  >
+                    <div className="upload-queue-main">
+                      <p className="upload-queue-name">{item.file.name}</p>
+                      <p className="upload-queue-meta">{formatFileSize(item.file.size)}</p>
+                      {item.status === "error" && item.error && (
+                        <p className="upload-queue-error">{item.error}</p>
+                      )}
+                    </div>
 
-                  <div className="upload-queue-actions">
-                    <span className={`queue-status queue-status-${item.status}`}>
-                      {status.icon ? `${status.icon} ` : ""}
-                      {status.label}
-                    </span>
+                    <div className="upload-queue-actions">
+                      <span className={`queue-status queue-status-${item.status}`}>
+                        {status.icon ? `${status.icon} ` : ""}
+                        {status.label}
+                      </span>
 
-                    {isDone && (
+                      {isDone && (
+                        <button
+                          className="queue-result-button"
+                          type="button"
+                          onClick={(event) => {
+                            event.stopPropagation();
+                            onShowQueueItemResult(item.id);
+                          }}
+                        >
+                          Visa resultat
+                        </button>
+                      )}
+
                       <button
-                        className="queue-result-button"
+                        className="queue-remove-button"
                         type="button"
                         onClick={(event) => {
                           event.stopPropagation();
-                          onShowQueueItemResult(item.id);
+                          onRemoveQueueItem(item.id);
                         }}
+                        disabled={loading && item.id === activeQueueItemId}
+                        aria-label={`Ta bort ${item.file.name}`}
                       >
-                        Visa resultat
+                        Ta bort
                       </button>
-                    )}
-
-                    <button
-                      className="queue-remove-button"
-                      type="button"
-                      onClick={(event) => {
-                        event.stopPropagation();
-                        onRemoveQueueItem(item.id);
-                      }}
-                      disabled={loading && item.id === activeQueueItemId}
-                      aria-label={`Ta bort ${item.file.name}`}
-                    >
-                      Ta bort
-                    </button>
-                  </div>
-                </article>
-              );
-            })}
-          </div>
+                    </div>
+                  </article>
+                );
+              })}
+            </div>
+          )}
         </div>
       )}
 
@@ -278,6 +322,13 @@ export default function InvoiceInputPanel({
 
       {error && <p className="error-message">{error}</p>}
       {warning && <p className="warning-message">{warning}</p>}
+      {duplicateCandidateCount > 0 && (
+        <div className="button-row">
+          <button className="btn btn-secondary" onClick={onAddDuplicateCandidates} disabled={loading}>
+            Ladda upp ändå ({duplicateCandidateCount})
+          </button>
+        </div>
+      )}
     </article>
   );
 }
