@@ -1,5 +1,5 @@
 {
-    "name": "minkostnadskoll",
+    "name": "minfakturakoll",
     "private": true,
     "scripts": {
         "dev": "concurrently -n FRONTEND,BACKEND -c blue,magenta \"npm --prefix Frontend run dev\" \"npm --prefix Backend run dev\"",

@@ -120,14 +120,14 @@ export const LEGAL_PAGES = [
       {
         heading: "Support",
         paragraphs: [
-          "För frågor om appen, datahantering eller kontot kan du kontakta support@minkostnadskoll.se.",
+          "För frågor om appen, datahantering eller kontot kan du kontakta support@minfakturakoll.se.",
           "Beskriv gärna ärendet med skärmbild och tidpunkt för snabbare felsökning.",
         ],
       },
       {
         heading: "Juridiska frågor",
         paragraphs: [
-          "Frågor om integritet, registerutdrag eller radering skickas till privacy@minkostnadskoll.se.",
+          "Frågor om integritet, registerutdrag eller radering skickas till privacy@minfakturakoll.se.",
           "Självservice för kontoradering finns också i Profilinställningar i appen.",
         ],
       },

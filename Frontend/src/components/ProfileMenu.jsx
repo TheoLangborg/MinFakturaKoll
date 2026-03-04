@@ -24,6 +24,11 @@ export default function ProfileMenu({ session, onLogout }) {
   const [inboxLoading, setInboxLoading] = useState(false);
   const [inboxError, setInboxError] = useState("");
   const [inboxCopyState, setInboxCopyState] = useState("idle");
+  function closeProfileModal() {
+    // Keep modal dismissable during inbox loading so users never get stuck.
+    setProfileOpen(false);
+    setInboxLoading(false);
+  }
 
   const avatarLabel = useMemo(() => {
     const source = String(session?.displayName || session?.email || "U");
@@ -76,6 +81,7 @@ export default function ProfileMenu({ session, onLogout }) {
       if (event.key === "Escape") {
         setMenuOpen(false);
         setProfileOpen(false);
+        setInboxLoading(false);
       }
     }
 
@@ -274,7 +280,7 @@ export default function ProfileMenu({ session, onLogout }) {
           className="profile-modal"
           role="dialog"
           aria-modal="true"
-          onClick={() => !loading && !inboxLoading && setProfileOpen(false)}
+          onClick={() => !loading && closeProfileModal()}
         >
           <article className="profile-modal-card" onClick={(event) => event.stopPropagation()}>
             <header className="profile-modal-header">
@@ -285,8 +291,8 @@ export default function ProfileMenu({ session, onLogout }) {
               <button
                 type="button"
                 className="btn btn-secondary"
-                disabled={loading || inboxLoading}
-                onClick={() => setProfileOpen(false)}
+                disabled={loading}
+                onClick={() => !loading && closeProfileModal()}
               >
                 Stäng
               </button>

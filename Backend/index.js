@@ -55,7 +55,7 @@ startInboundInvoiceWorker();
 
 app.listen(port, () => {
   console.log(`[cors] Allowed frontend origins: ${[...allowedOrigins].join(", ")}`);
-  console.log(`MinKostnadskoll backend startad: http://localhost:${port}`);
+  console.log(`MinFakturaKoll backend startad: http://localhost:${port}`);
 });
 
 function resolveAllowedOrigins() {

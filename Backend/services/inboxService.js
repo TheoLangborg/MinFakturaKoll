@@ -33,7 +33,7 @@ export async function createOrGetInboxForUser(userId) {
       ok: false,
       statusCode: 503,
       reason:
-        "INBOUND_DOMAIN saknas i backend-miljön. Lägg till t.ex. INBOUND_DOMAIN=in.minkostnadskoll.se.",
+        "INBOUND_DOMAIN saknas i backend-miljön. Lägg till t.ex. INBOUND_DOMAIN=in.minfakturakoll.se.",
     };
   }
 

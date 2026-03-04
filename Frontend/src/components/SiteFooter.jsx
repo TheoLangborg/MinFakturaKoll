@@ -26,7 +26,7 @@ export default function SiteFooter() {
       <footer className="site-footer">
         <div className="site-footer-main">
           <div className="site-footer-brand">
-            <strong>MinKostnadskoll</strong>
+            <strong>MinFakturaKoll</strong>
             <p>Analysera fakturor snabbare, säkrare och mer strukturerat.</p>
           </div>
 
@@ -45,7 +45,7 @@ export default function SiteFooter() {
         </div>
 
         <div className="site-footer-meta">
-          <span>© {new Date().getFullYear()} MinKostnadskoll</span>
+          <span>© {new Date().getFullYear()} MinFakturaKoll</span>
           <span>Alla rättigheter förbehållna</span>
         </div>
       </footer>

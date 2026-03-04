@@ -1,7 +1,7 @@
 import { FIREBASE_WEB_API_KEY } from "../constants/appConstants.js";
 
-const AUTH_STORAGE_KEY = "minkostnadskoll_auth_session_v1";
-const AUTH_CHANGE_EVENT = "minkostnadskoll-auth-change";
+const AUTH_STORAGE_KEY = "minfakturakoll_auth_session_v1";
+const AUTH_CHANGE_EVENT = "minfakturakoll-auth-change";
 const TOKEN_REFRESH_MARGIN_MS = 60 * 1000;
 
 export function getStoredAuthSession() {
