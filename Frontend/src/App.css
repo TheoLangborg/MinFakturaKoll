@@ -2200,6 +2200,59 @@
   font-weight: 700;
 }
 
+.history-edit-field-head {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.history-field-confidence {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  border-radius: 999px;
+  padding: 3px 9px;
+  font-size: 0.72rem;
+  font-weight: 700;
+  line-height: 1;
+  white-space: nowrap;
+  border: 1px solid transparent;
+}
+
+.history-field-confidence-high {
+  background: rgba(27, 155, 134, 0.18);
+  border-color: rgba(27, 155, 134, 0.38);
+  color: #0f5c51;
+}
+
+.history-field-confidence-medium {
+  background: rgba(205, 162, 47, 0.2);
+  border-color: rgba(205, 162, 47, 0.38);
+  color: #6d540f;
+}
+
+.history-field-confidence-low {
+  background: rgba(178, 54, 59, 0.16);
+  border-color: rgba(178, 54, 59, 0.35);
+  color: #7f252a;
+}
+
+.history-edit-field-high .metric-input {
+  border-color: rgba(27, 155, 134, 0.46);
+  box-shadow: inset 0 0 0 1px rgba(27, 155, 134, 0.08);
+}
+
+.history-edit-field-medium .metric-input {
+  border-color: rgba(205, 162, 47, 0.52);
+  box-shadow: inset 0 0 0 1px rgba(205, 162, 47, 0.08);
+}
+
+.history-edit-field-low .metric-input {
+  border-color: rgba(178, 54, 59, 0.44);
+  box-shadow: inset 0 0 0 1px rgba(178, 54, 59, 0.08);
+}
+
 .history-edit-note {
   margin: 12px 0 0;
   color: var(--ink-600);
@@ -2551,10 +2604,12 @@
   .site-footer-main {
     flex-direction: column;
     align-items: stretch;
+    gap: 12px;
   }
 
   .site-footer-links {
     justify-content: flex-start;
+    width: 100%;
   }
 }
 
@@ -2603,13 +2658,48 @@
   }
 
   .site-footer {
-    padding: 12px;
-    border-radius: 14px;
+    padding: 14px;
+    border-radius: 16px;
+    background: linear-gradient(
+      145deg,
+      rgba(255, 255, 255, 0.92) 0%,
+      rgba(240, 248, 251, 0.9) 100%
+    );
+    box-shadow: 0 14px 26px rgba(15, 29, 45, 0.12);
+  }
+
+  .site-footer-main {
+    gap: 12px;
+  }
+
+  .site-footer-brand {
+    text-align: center;
+  }
+
+  .site-footer-brand p {
+    margin-top: 8px;
+  }
+
+  .site-footer-links {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 8px;
   }
 
   .site-footer-link {
-    width: 100%;
+    width: auto;
     text-align: center;
+    min-height: 36px;
+    padding: 8px 10px;
+  }
+
+  .site-footer-meta {
+    margin-top: 10px;
+    padding-top: 10px;
+    flex-direction: column;
+    align-items: center;
+    text-align: center;
+    gap: 4px;
   }
 
   .preview-meta {
@@ -2686,6 +2776,12 @@
     grid-template-columns: 1fr;
   }
 
+  .history-edit-field-head {
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 4px;
+  }
+
   .history-bulk-toolbar {
     flex-direction: column;
     align-items: stretch;
@@ -2702,6 +2798,15 @@
 
   .history-bulk-actions .btn {
     width: 100%;
+  }
+
+  .history-card-top {
+    flex-direction: column;
+    align-items: stretch;
+  }
+
+  .history-card-actions {
+    justify-content: flex-start;
   }
 
   .button-row .btn {

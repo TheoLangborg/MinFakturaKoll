@@ -164,6 +164,8 @@ async function extractWithOpenAI({ text, file, openAiApiKey, openAiModel }) {
                 "- dueDate and invoiceDate must be YYYY-MM-DD or null.",
                 "- category should be one of: Mobil, Internet, El, Försäkring, Streaming, Bank, Tjänst, Övrigt.",
                 "- paymentMethod should be one of: Autogiro, E-faktura, Bankgiro, Plusgiro, Kort, Swish, Okänt.",
+                "- Ignore metadata lines like 'Inbound email invoice metadata', 'from:', 'subject:', 'recipient:', 'received_at:' and 'file_name:'.",
+                "- If a field is not found in the invoice content, return null for that field.",
               ].join(" "),
             },
           ],

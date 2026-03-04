@@ -15,13 +15,18 @@ const FIELD_KEYS = [
 ];
 
 const DEFAULT_SOURCE_TEXT = "Ingen tydlig källa hittades i texten.";
+const UNKNOWN_VENDOR_LABEL = "Ingen leverantör hittades";
 
 export function normalizeExtracted(raw, fallbackText = "") {
   const fallback = extractWithRules(fallbackText);
   const rawExtracted = getRawExtracted(raw);
   const rawFieldMeta = getRawFieldMeta(raw);
 
-  const totalAmount = toNumber(rawExtracted?.totalAmount, fallback.totalAmount);
+  const totalAmount = resolveTotalAmount({
+    rawTotalAmount: rawExtracted?.totalAmount,
+    fallbackTotalAmount: fallback.totalAmount,
+    rawTotalSourceText: rawFieldMeta?.totalAmount?.sourceText,
+  });
   const monthlyCost = resolveMonthlyCost({
     rawMonthlyCost: toNumber(rawExtracted?.monthlyCost, null),
     fallbackMonthlyCost: fallback.monthlyCost,
@@ -38,22 +43,30 @@ export function normalizeExtracted(raw, fallbackText = "") {
     fallbackCategory,
     sourceText: fallbackText,
   });
+  const vendorName = normalizeVendorName(rawExtracted?.vendorName, fallback.vendorName);
+  const customerNumber = sanitizeExtractedText(
+    rawExtracted?.customerNumber,
+    fallback.customerNumber
+  );
+  const invoiceNumber = sanitizeExtractedText(rawExtracted?.invoiceNumber, fallback.invoiceNumber);
+  const organizationNumber = sanitizeExtractedText(
+    rawExtracted?.organizationNumber,
+    fallback.organizationNumber
+  );
+  const ocrNumber = sanitizeExtractedText(rawExtracted?.ocrNumber, fallback.ocrNumber);
 
   const extracted = {
-    vendorName: cleanString(rawExtracted?.vendorName, fallback.vendorName),
+    vendorName,
     category,
     monthlyCost,
     totalAmount,
     currency: cleanString(rawExtracted?.currency, "SEK"),
     dueDate: normalizeDate(rawExtracted?.dueDate || fallback.dueDate),
     invoiceDate: normalizeDate(rawExtracted?.invoiceDate || fallback.invoiceDate),
-    customerNumber: cleanString(rawExtracted?.customerNumber, fallback.customerNumber),
-    invoiceNumber: cleanString(rawExtracted?.invoiceNumber, fallback.invoiceNumber),
-    organizationNumber: cleanString(
-      rawExtracted?.organizationNumber,
-      fallback.organizationNumber
-    ),
-    ocrNumber: cleanString(rawExtracted?.ocrNumber, fallback.ocrNumber),
+    customerNumber,
+    invoiceNumber,
+    organizationNumber,
+    ocrNumber,
     vatAmount,
     paymentMethod: normalizePaymentMethod(rawExtracted?.paymentMethod || fallback.paymentMethod),
     confidence,
@@ -66,12 +79,7 @@ export function normalizeExtracted(raw, fallbackText = "") {
 
 export function extractWithRules(text) {
   const source = String(text || "");
-  const firstLine = source
-    .split(/\r?\n/)
-    .map((line) => line.trim())
-    .find((line) => line.length > 0);
-
-  const vendorName = firstLine || "Okänd leverantör";
+  const vendorName = findVendorLine(source) || UNKNOWN_VENDOR_LABEL;
   const customerNumber =
     findMatch(source, [
       /kundnummer[:\s]*([a-z0-9\-]+)/i,
@@ -143,7 +151,7 @@ export function extractWithRules(text) {
   const paymentMethod = guessPaymentMethod(source);
 
   let confidence = 0.25;
-  if (vendorName && vendorName !== "Okänd leverantör") confidence += 0.15;
+  if (vendorName && !isUnknownVendor(vendorName)) confidence += 0.15;
   if (totalAmount != null) confidence += 0.15;
   if (dueDate) confidence += 0.1;
   if (invoiceNumber) confidence += 0.1;
@@ -171,7 +179,10 @@ export function extractWithRules(text) {
 }
 
 export function buildEmailActions(extracted) {
-  const vendor = extracted.vendorName || "leverantören";
+  const vendor =
+    extracted.vendorName && !isUnknownVendor(extracted.vendorName)
+      ? extracted.vendorName
+      : "leverantören";
   const customer = extracted.customerNumber || "okänt";
   const invoiceNumber = extracted.invoiceNumber || "okänt";
   const amountText =
@@ -234,7 +245,7 @@ export function buildEmailActions(extracted) {
 export function buildMissingFields(extracted) {
   const missing = [];
 
-  if (!extracted.vendorName || extracted.vendorName === "Okänd leverantör") {
+  if (!extracted.vendorName || isUnknownVendor(extracted.vendorName)) {
     missing.push("Leverantör");
   }
 
@@ -383,7 +394,7 @@ function inferSourceText(text, key, value) {
   if (byValue) return byValue;
 
   const patternMap = {
-    vendorName: [/^.{2,}$/],
+    vendorName: [],
     category: [/abonnemang|bredband|internet|elfaktura|försäkring|bank|stream|installation|hantverk|rot|renovering|service|arbete/i],
     monthlyCost: [/månadskostnad|månadsavgift|per\s*månad|\/\s*mån|kr\s*\/\s*mån|abonnemang/i],
     totalAmount: [/att\s*betala|belopp|total|summa/i],
@@ -405,7 +416,7 @@ function inferSourceText(text, key, value) {
   }
 
   if (key === "vendorName") {
-    return lines[0];
+    return lines.find((line) => isLikelyVendorLine(line)) || "";
   }
 
   return "";
@@ -464,6 +475,37 @@ function extractMonthlyCost(source) {
   ]);
 
   return toNumber(match, null);
+}
+
+function resolveTotalAmount({ rawTotalAmount, fallbackTotalAmount, rawTotalSourceText }) {
+  const rawCandidate = toNumber(rawTotalAmount, null);
+  const fallbackCandidate = toNumber(fallbackTotalAmount, null);
+  const sourceCandidate = extractHighestAmount(rawTotalSourceText);
+
+  if (
+    sourceCandidate != null &&
+    rawCandidate != null &&
+    Math.abs(sourceCandidate - rawCandidate) >= 0.5
+  ) {
+    return sourceCandidate;
+  }
+
+  if (rawCandidate != null) return rawCandidate;
+  if (sourceCandidate != null) return sourceCandidate;
+  return fallbackCandidate;
+}
+
+function extractHighestAmount(text) {
+  const content = cleanString(text, "");
+  if (!content) return null;
+
+  const matches = content.match(/[0-9][0-9\s.,]*/g) || [];
+  const values = matches
+    .map((match) => toNumber(match, null))
+    .filter((value) => value != null);
+
+  if (!values.length) return null;
+  return Math.max(...values);
 }
 
 function resolveMonthlyCost({
@@ -622,6 +664,86 @@ function guessPaymentMethod(text) {
   if (lower.includes("kort")) return "Kort";
   if (lower.includes("swish")) return "Swish";
   return "Okänt";
+}
+
+function findVendorLine(source) {
+  const lines = String(source || "")
+    .split(/\r?\n/)
+    .map((line) => cleanString(line, ""))
+    .filter(Boolean);
+
+  return lines.find((line) => isLikelyVendorLine(line)) || "";
+}
+
+function normalizeVendorName(primaryValue, fallbackValue) {
+  const primary = sanitizeExtractedText(primaryValue, "");
+  const fallback = sanitizeExtractedText(fallbackValue, "");
+  const candidate = primary || fallback;
+
+  if (!candidate || isUnknownVendor(candidate)) {
+    return UNKNOWN_VENDOR_LABEL;
+  }
+
+  return candidate;
+}
+
+function sanitizeExtractedText(value, fallback = "") {
+  const primary = cleanString(value, "");
+  if (primary && !looksLikeInboundMetadataText(primary)) {
+    return primary;
+  }
+
+  const safeFallback = cleanString(fallback, "");
+  if (safeFallback && !looksLikeInboundMetadataText(safeFallback)) {
+    return safeFallback;
+  }
+
+  return "";
+}
+
+function looksLikeInboundMetadataText(value) {
+  const text = normalizeTextValue(value);
+  if (!text) return false;
+
+  if (text.includes("inbound email invoice metadata")) return true;
+  if (/^(from|subject|recipient|received_at|file_name|ocr_text)\s*:/.test(text)) return true;
+  if (/^(from|subject|recipient|received_at|file_name|ocr_text)$/.test(text)) return true;
+
+  return /^(null|none|n\/a|unknown|-|--)$/.test(text);
+}
+
+function isLikelyVendorLine(value) {
+  const text = cleanString(value, "");
+  if (!text) return false;
+  if (looksLikeInboundMetadataText(text)) return false;
+  if (text.includes("@")) return false;
+  if (!/[A-Za-zÅÄÖåäö]/.test(text)) return false;
+
+  const normalized = normalizeTextValue(text);
+  if (/^(invoice|faktura)\s*$/.test(normalized)) return false;
+  if (/^(invoice|faktura)\s*(nr|number)?\s*[:#-]?\s*[a-z0-9-]*$/.test(normalized)) return false;
+
+  return text.length >= 2;
+}
+
+function isUnknownVendor(value) {
+  const text = normalizeTextValue(value);
+  if (!text) return true;
+
+  return [
+    "okand leverantor",
+    "ingen leverantor hittades",
+    "unknown vendor",
+    "leverantor okand",
+  ].includes(text);
+}
+
+function normalizeTextValue(value) {
+  return String(value || "")
+    .trim()
+    .toLowerCase()
+    .normalize("NFD")
+    .replace(/[\u0300-\u036f]/g, "");
 }
 
 function shuffleArray(items) {

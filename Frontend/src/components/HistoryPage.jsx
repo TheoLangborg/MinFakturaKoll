@@ -48,7 +48,7 @@ function HistoryCard({
   const status = getStatusMeta(item);
   const billingType = getBillingTypeMeta(item);
   const nextBillingType = getToggledBillingType(item?.billingType, item);
-  const vendorName = cleanDisplayText(item.vendorName) || "Okänd leverantör";
+  const vendorName = getVendorDisplayName(item.vendorName);
   const category = normalizeCategory(cleanDisplayText(item.category));
 
   function handleOpenOrToggle() {
@@ -159,17 +159,48 @@ function HistoryCard({
   );
 }
 
+function HistoryFieldLabel({ label, status }) {
+  return (
+    <span className="history-edit-field-head">
+      <span>{label}</span>
+      <span className={`history-field-confidence history-field-confidence-${status.tone}`}>
+        {status.label}
+      </span>
+    </span>
+  );
+}
+
 function HistoryInvoiceModal({ item, draft, saving, onFieldChange, onSave, onClose, onOpenPreview }) {
   if (!item || !draft) return null;
   const previewFile = toHistoryPreviewFile(item);
   const previewNotice = getHistoryPreviewNotice(item);
+  const fieldStatus = {
+    vendorName: resolveHistoryFieldStatus(item, "vendorName", draft.vendorName),
+    category: resolveHistoryFieldStatus(item, "category", draft.category),
+    billingType: resolveHistoryFieldStatus(item, "billingType", draft.billingType),
+    invoiceDate: resolveHistoryFieldStatus(item, "invoiceDate", draft.invoiceDate),
+    dueDate: resolveHistoryFieldStatus(item, "dueDate", draft.dueDate),
+    invoiceNumber: resolveHistoryFieldStatus(item, "invoiceNumber", draft.invoiceNumber),
+    customerNumber: resolveHistoryFieldStatus(item, "customerNumber", draft.customerNumber),
+    ocrNumber: resolveHistoryFieldStatus(item, "ocrNumber", draft.ocrNumber),
+    organizationNumber: resolveHistoryFieldStatus(
+      item,
+      "organizationNumber",
+      draft.organizationNumber
+    ),
+    monthlyCost: resolveHistoryFieldStatus(item, "monthlyCost", draft.monthlyCost),
+    totalAmount: resolveHistoryFieldStatus(item, "totalAmount", draft.totalAmount),
+    vatAmount: resolveHistoryFieldStatus(item, "vatAmount", draft.vatAmount),
+    currency: resolveHistoryFieldStatus(item, "currency", draft.currency),
+    paymentMethod: resolveHistoryFieldStatus(item, "paymentMethod", draft.paymentMethod),
+  };
 
   return (
     <div className="preview-modal" role="dialog" aria-modal="true" onClick={onClose}>
       <article className="preview-modal-card history-edit-modal-card" onClick={(event) => event.stopPropagation()}>
         <header className="preview-modal-header">
           <div>
-            <strong>Faktura från {cleanDisplayText(item.vendorName) || "Okänd leverantör"}</strong>
+            <strong>Faktura från {getVendorDisplayName(item.vendorName)}</strong>
             <p>Redigera uppgifter och spara till historiken.</p>
           </div>
           <button className="btn btn-secondary" onClick={onClose} disabled={saving}>
@@ -199,17 +230,18 @@ function HistoryInvoiceModal({ item, draft, saving, onFieldChange, onSave, onClo
           </section>
 
           <div className="history-edit-grid">
-            <label className="history-edit-field">
-              Leverantör
+            <label className={`history-edit-field history-edit-field-${fieldStatus.vendorName.tone}`}>
+              <HistoryFieldLabel label="Leverantör" status={fieldStatus.vendorName} />
               <input
                 className="metric-input"
                 value={draft.vendorName}
                 onChange={(event) => onFieldChange("vendorName", event.target.value)}
+                placeholder="Ingen leverantör hittades"
               />
             </label>
 
-            <label className="history-edit-field">
-              Kategori
+            <label className={`history-edit-field history-edit-field-${fieldStatus.category.tone}`}>
+              <HistoryFieldLabel label="Kategori" status={fieldStatus.category} />
               <select
                 className="metric-input"
                 value={draft.category}
@@ -224,8 +256,8 @@ function HistoryInvoiceModal({ item, draft, saving, onFieldChange, onSave, onClo
               </select>
             </label>
 
-            <label className="history-edit-field">
-              Fakturatyp
+            <label className={`history-edit-field history-edit-field-${fieldStatus.billingType.tone}`}>
+              <HistoryFieldLabel label="Fakturatyp" status={fieldStatus.billingType} />
               <select
                 className="metric-input"
                 value={draft.billingType}
@@ -239,8 +271,8 @@ function HistoryInvoiceModal({ item, draft, saving, onFieldChange, onSave, onClo
               </select>
             </label>
 
-            <label className="history-edit-field">
-              Fakturadatum
+            <label className={`history-edit-field history-edit-field-${fieldStatus.invoiceDate.tone}`}>
+              <HistoryFieldLabel label="Fakturadatum" status={fieldStatus.invoiceDate} />
               <input
                 className="metric-input"
                 type="date"
@@ -249,8 +281,8 @@ function HistoryInvoiceModal({ item, draft, saving, onFieldChange, onSave, onClo
               />
             </label>
 
-            <label className="history-edit-field">
-              Förfallodatum
+            <label className={`history-edit-field history-edit-field-${fieldStatus.dueDate.tone}`}>
+              <HistoryFieldLabel label="Förfallodatum" status={fieldStatus.dueDate} />
               <input
                 className="metric-input"
                 type="date"
@@ -259,74 +291,81 @@ function HistoryInvoiceModal({ item, draft, saving, onFieldChange, onSave, onClo
               />
             </label>
 
-            <label className="history-edit-field">
-              Fakturanummer
+            <label className={`history-edit-field history-edit-field-${fieldStatus.invoiceNumber.tone}`}>
+              <HistoryFieldLabel label="Fakturanummer" status={fieldStatus.invoiceNumber} />
               <input
                 className="metric-input"
                 value={draft.invoiceNumber}
                 onChange={(event) => onFieldChange("invoiceNumber", event.target.value)}
+                placeholder="Inget fakturanummer hittades"
               />
             </label>
 
-            <label className="history-edit-field">
-              Kundnummer
+            <label className={`history-edit-field history-edit-field-${fieldStatus.customerNumber.tone}`}>
+              <HistoryFieldLabel label="Kundnummer" status={fieldStatus.customerNumber} />
               <input
                 className="metric-input"
                 value={draft.customerNumber}
                 onChange={(event) => onFieldChange("customerNumber", event.target.value)}
+                placeholder="Inget kundnummer hittades"
               />
             </label>
 
-            <label className="history-edit-field">
-              OCR-nummer
+            <label className={`history-edit-field history-edit-field-${fieldStatus.ocrNumber.tone}`}>
+              <HistoryFieldLabel label="OCR-nummer" status={fieldStatus.ocrNumber} />
               <input
                 className="metric-input"
                 value={draft.ocrNumber}
                 onChange={(event) => onFieldChange("ocrNumber", event.target.value)}
+                placeholder="Inget OCR-nummer hittades"
               />
             </label>
 
-            <label className="history-edit-field">
-              Organisationsnummer
+            <label className={`history-edit-field history-edit-field-${fieldStatus.organizationNumber.tone}`}>
+              <HistoryFieldLabel label="Organisationsnummer" status={fieldStatus.organizationNumber} />
               <input
                 className="metric-input"
                 value={draft.organizationNumber}
                 onChange={(event) => onFieldChange("organizationNumber", event.target.value)}
+                placeholder="Inget organisationsnummer hittades"
               />
             </label>
 
-            <label className="history-edit-field">
-              Månadskostnad
+            <label className={`history-edit-field history-edit-field-${fieldStatus.monthlyCost.tone}`}>
+              <HistoryFieldLabel label="Månadskostnad" status={fieldStatus.monthlyCost} />
               <input
                 className="metric-input"
                 inputMode="decimal"
                 value={draft.monthlyCost}
                 onChange={(event) => onFieldChange("monthlyCost", event.target.value)}
+                placeholder="Ingen månadskostnad hittades"
               />
             </label>
 
-            <label className="history-edit-field">
-              Totalbelopp
+            <label className={`history-edit-field history-edit-field-${fieldStatus.totalAmount.tone}`}>
+              <HistoryFieldLabel label="Totalbelopp" status={fieldStatus.totalAmount} />
               <input
                 className="metric-input"
                 inputMode="decimal"
                 value={draft.totalAmount}
                 onChange={(event) => onFieldChange("totalAmount", event.target.value)}
+                placeholder="Inget totalbelopp hittades"
               />
             </label>
 
-            <label className="history-edit-field">
-              Moms
+            <label className={`history-edit-field history-edit-field-${fieldStatus.vatAmount.tone}`}>
+              <HistoryFieldLabel label="Moms" status={fieldStatus.vatAmount} />
               <input
                 className="metric-input"
                 inputMode="decimal"
                 value={draft.vatAmount}
                 onChange={(event) => onFieldChange("vatAmount", event.target.value)}
+                placeholder="Ingen moms hittades"
               />
             </label>
 
-            <label className="history-edit-field">
-              Valuta
+            <label className={`history-edit-field history-edit-field-${fieldStatus.currency.tone}`}>
+              <HistoryFieldLabel label="Valuta" status={fieldStatus.currency} />
               <select
                 className="metric-input"
                 value={draft.currency}
@@ -341,8 +380,8 @@ function HistoryInvoiceModal({ item, draft, saving, onFieldChange, onSave, onClo
               </select>
             </label>
 
-            <label className="history-edit-field">
-              Betalsätt
+            <label className={`history-edit-field history-edit-field-${fieldStatus.paymentMethod.tone}`}>
+              <HistoryFieldLabel label="Betalsätt" status={fieldStatus.paymentMethod} />
               <select
                 className="metric-input"
                 value={draft.paymentMethod}
@@ -375,7 +414,6 @@ function HistoryInvoiceModal({ item, draft, saving, onFieldChange, onSave, onClo
     </div>
   );
 }
-
 function ConfirmModal({ isOpen, title, message, confirmLabel, onCancel, onConfirm, loading }) {
   if (!isOpen) return null;
 
@@ -1336,15 +1374,15 @@ function normalizeText(value) {
 
 function toDraft(item) {
   return {
-    vendorName: cleanDisplayText(item.vendorName),
+    vendorName: sanitizeDraftField("vendorName", item.vendorName),
     category: normalizeCategory(cleanDisplayText(item.category)),
     billingType: normalizeBillingType(cleanDisplayText(item.billingType), item),
     invoiceDate: item.invoiceDate || "",
     dueDate: item.dueDate || "",
-    invoiceNumber: cleanDisplayText(item.invoiceNumber),
-    customerNumber: cleanDisplayText(item.customerNumber),
-    ocrNumber: cleanDisplayText(item.ocrNumber),
-    organizationNumber: cleanDisplayText(item.organizationNumber),
+    invoiceNumber: sanitizeDraftField("invoiceNumber", item.invoiceNumber),
+    customerNumber: sanitizeDraftField("customerNumber", item.customerNumber),
+    ocrNumber: sanitizeDraftField("ocrNumber", item.ocrNumber),
+    organizationNumber: sanitizeDraftField("organizationNumber", item.organizationNumber),
     monthlyCost: formatNumberWithSpaces(item.monthlyCost, { fallback: "" }),
     totalAmount: formatNumberWithSpaces(item.totalAmount, { fallback: "" }),
     vatAmount: formatNumberWithSpaces(item.vatAmount, { fallback: "" }),
@@ -1574,6 +1612,130 @@ function inferBillingType(context = {}) {
   return "Oklart";
 }
 
+function getVendorDisplayName(value) {
+  const text = cleanDisplayText(value);
+  if (!text) return "Ingen leverantör hittades";
+  if (looksLikeMetadataNoise(text)) return "Ingen leverantör hittades";
+
+  const normalized = normalizeText(text);
+  if (normalized === "okand leverantor" || normalized === "ingen leverantor hittades") {
+    return "Ingen leverantör hittades";
+  }
+
+  return text;
+}
+
+function resolveHistoryFieldStatus(item, fieldKey, value) {
+  const missing = isMissingHistoryFieldValue(fieldKey, value);
+  const metaConfidence = Number(item?.fieldMeta?.[fieldKey]?.confidence);
+  const globalConfidence = Number(item?.confidence);
+
+  let confidence = 0.22;
+  if (!missing && Number.isFinite(metaConfidence)) {
+    confidence = clamp01(metaConfidence);
+  } else if (!missing && Number.isFinite(globalConfidence)) {
+    confidence = clamp01(globalConfidence);
+  } else if (!missing) {
+    confidence = 0.62;
+  }
+
+  if (!missing && fieldKey === "paymentMethod") {
+    const payment = normalizeText(cleanDisplayText(value));
+    if (payment === "okant") confidence = Math.min(confidence, 0.48);
+  }
+
+  if (!missing && fieldKey === "category") {
+    const category = normalizeText(cleanDisplayText(value));
+    if (category === "ovrigt") confidence = Math.min(confidence, 0.54);
+  }
+
+  const tone = confidence >= 0.8 ? "high" : confidence >= 0.55 ? "medium" : "low";
+  if (missing) {
+    return {
+      tone: "low",
+      label: "Saknas",
+    };
+  }
+
+  const percentage = Math.round(confidence * 100);
+  const toneLabel = tone === "high" ? "Hög" : tone === "medium" ? "Medel" : "Låg";
+  return {
+    tone,
+    label: `${toneLabel} ${percentage}%`,
+  };
+}
+
+function isMissingHistoryFieldValue(fieldKey, value) {
+  const text = cleanDisplayText(value);
+
+  if (fieldKey === "invoiceDate" || fieldKey === "dueDate") {
+    return !parseDate(value);
+  }
+
+  if (fieldKey === "monthlyCost" || fieldKey === "totalAmount" || fieldKey === "vatAmount") {
+    return toNumberOrNull(value) == null;
+  }
+
+  if (fieldKey === "paymentMethod") {
+    const normalized = normalizeText(text);
+    return !text || normalized === "okant";
+  }
+
+  if (fieldKey === "billingType") {
+    const normalized = normalizeText(text);
+    return !text || normalized === "oklart";
+  }
+
+  if (fieldKey === "vendorName") {
+    if (!text || looksLikeMetadataNoise(text)) return true;
+    const normalized = normalizeText(text);
+    return normalized === "okand leverantor" || normalized === "ingen leverantor hittades";
+  }
+
+  if (
+    fieldKey === "invoiceNumber" ||
+    fieldKey === "customerNumber" ||
+    fieldKey === "ocrNumber" ||
+    fieldKey === "organizationNumber"
+  ) {
+    return !text || looksLikeMetadataNoise(text);
+  }
+
+  return !text;
+}
+
+function sanitizeDraftField(fieldKey, value) {
+  const text = cleanDisplayText(value);
+  if (!text) return "";
+  if (looksLikeMetadataNoise(text)) return "";
+
+  if (fieldKey === "vendorName") {
+    const normalized = normalizeText(text);
+    if (normalized === "okand leverantor" || normalized === "ingen leverantor hittades") {
+      return "";
+    }
+  }
+
+  return text;
+}
+
+function looksLikeMetadataNoise(value) {
+  const text = normalizeText(cleanDisplayText(value));
+  if (!text) return false;
+
+  if (text.includes("inbound email invoice metadata")) return true;
+  if (/^(from|subject|recipient|received_at|file_name|ocr_text)\s*:/.test(text)) return true;
+  if (/^(from|subject|recipient|received_at|file_name|ocr_text)$/.test(text)) return true;
+
+  return false;
+}
+
+function clamp01(value) {
+  if (!Number.isFinite(value)) return 0;
+  if (value < 0) return 0;
+  if (value > 1) return 1;
+  return value;
+}
 function cleanDisplayText(value) {
   return String(value || "")
     .replace(/Ã¤/g, "ä")
