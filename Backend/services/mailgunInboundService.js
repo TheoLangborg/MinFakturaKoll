@@ -581,15 +581,19 @@ function extractAddressByDomain(values, inboundDomain) {
   values.forEach((value) => {
     const text = String(value || "");
     const found = text.match(/[A-Z0-9._%+-]+@[A-Z0-9.-]+\.[A-Z]{2,}/gi) || [];
-    found.forEach((entry) => allCandidates.push(entry.toLowerCase()));
+    // Keep original local-part casing. Firestore inbox tokens are case-sensitive.
+    found.forEach((entry) => allCandidates.push(String(entry).trim()));
   });
 
-  const match = allCandidates.find((email) => email.endsWith(`@${inboundDomain}`));
+  const match = allCandidates.find((email) =>
+    String(email || "").toLowerCase().endsWith(`@${inboundDomain}`)
+  );
   return match || "";
 }
 
 function extractTokenFromAddress(address) {
-  const email = String(address || "").toLowerCase().trim();
+  // Do not lowercase token: document IDs in Firestore are case-sensitive.
+  const email = String(address || "").trim();
   if (!email.includes("@")) return "";
   const localPart = email.split("@")[0] || "";
   const token = localPart.split("+")[0] || "";
