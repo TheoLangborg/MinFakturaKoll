@@ -6,23 +6,23 @@ import { toUserErrorMessage } from "../utils/errorText.js";
 const CONSENT_ITEMS = [
   {
     id: "privacyAccepted",
-    label: "Jag har last integritetspolicyn och forstar personuppgiftsbehandlingen.",
+    label: "Jag har läst integritetspolicyn och förstår personuppgiftsbehandlingen.",
   },
   {
     id: "termsAccepted",
-    label: "Jag accepterar anvandarvillkoren for e-postimport och automatisk analys.",
+    label: "Jag accepterar användarvillkoren för e-postimport och automatisk analys.",
   },
   {
     id: "cookiesAccepted",
-    label: "Jag godkanner nodvandig lagring for sessions- och OAuth-sakerhet.",
+    label: "Jag godkänner nödvändig lagring för sessions- och OAuth-säkerhet.",
   },
   {
     id: "securityAccepted",
-    label: "Jag forstar att jag kan koppla fran kontot nar som helst i Profil.",
+    label: "Jag förstår att jag kan koppla från kontot när som helst i Profil.",
   },
   {
     id: "oauthDataUseAccepted",
-    label: "Jag godkanner att endast fakturarelaterad metadata och bilagor behandlas for import.",
+    label: "Jag godkänner att endast fakturarelaterad metadata och bilagor behandlas för import.",
   },
 ];
 
@@ -73,7 +73,7 @@ export default function MailConnectionSection({ isOpen, disabled = false }) {
       const response = await apiFetch("/api/mail-connections/status");
       const json = await response.json();
       if (!response.ok || !json.ok) {
-        throw new Error(json.error || json.reason || "Kunde inte hamta mailkopplingar.");
+        throw new Error(json.error || json.reason || "Kunde inte hämta mailkopplingar.");
       }
       setProviders(Array.isArray(json.providers) ? json.providers : []);
       if (json.encryptionWarning) {
@@ -81,7 +81,7 @@ export default function MailConnectionSection({ isOpen, disabled = false }) {
       }
     } catch (caughtError) {
       setProviders([]);
-      setError(toUserErrorMessage(caughtError, "Kunde inte hamta mailkopplingar."));
+      setError(toUserErrorMessage(caughtError, "Kunde inte hämta mailkopplingar."));
     } finally {
       setLoading(false);
     }
@@ -89,7 +89,7 @@ export default function MailConnectionSection({ isOpen, disabled = false }) {
 
   async function handleConnect(providerId) {
     if (!allConsentsAccepted) {
-      setError("Du maste godkanna samtliga samtycken innan du kan koppla konto.");
+      setError("Du måste godkänna samtliga samtycken innan du kan koppla konto.");
       return;
     }
 
@@ -119,7 +119,7 @@ export default function MailConnectionSection({ isOpen, disabled = false }) {
         throw new Error("OAuth-kopplingen kunde inte startas eftersom authorizationUrl saknas.");
       }
 
-      setInfo(`Omdirigerar till ${resolveProviderLabel(providerId)} for godkannande...`);
+      setInfo(`Omdirigerar till ${resolveProviderLabel(providerId)} för godkännande...`);
       window.location.assign(authorizationUrl);
     } catch (caughtError) {
       setError(toUserErrorMessage(caughtError, "Kunde inte starta OAuth-kopplingen."));
@@ -138,13 +138,13 @@ export default function MailConnectionSection({ isOpen, disabled = false }) {
       });
       const json = await response.json();
       if (!response.ok || !json.ok) {
-        throw new Error(json.error || "Kunde inte koppla fran kontot.");
+        throw new Error(json.error || "Kunde inte koppla från kontot.");
       }
 
-      setInfo(`${resolveProviderLabel(providerId)} ar fran kopplat.`);
+      setInfo(`${resolveProviderLabel(providerId)} är frånkopplat.`);
       await loadStatus();
     } catch (caughtError) {
-      setError(toUserErrorMessage(caughtError, "Kunde inte koppla fran kontot."));
+      setError(toUserErrorMessage(caughtError, "Kunde inte koppla från kontot."));
     } finally {
       setActiveProvider("");
     }
@@ -154,12 +154,12 @@ export default function MailConnectionSection({ isOpen, disabled = false }) {
     <section className="profile-section profile-mail-section">
       <h4>E-postintegration (OAuth)</h4>
       <p>
-        Koppla Gmail eller Outlook for att i framtiden kunna importera fakturor automatiskt med ditt
-        uttryckliga godkannande.
+        Koppla Gmail eller Outlook för att i framtiden kunna importera fakturor automatiskt med ditt
+        uttryckliga godkännande.
       </p>
       <p className="profile-mail-note">
-        Vi begar enbart lasbehorighet till mail och lagrar krypterade token. Du kan nar som helst
-        koppla fran kontot.
+        Vi begär enbart läsbehörighet till mail och lagrar krypterade token. Du kan när som helst
+        koppla från kontot.
       </p>
 
       <div className="profile-mail-consent-list">
@@ -208,7 +208,7 @@ export default function MailConnectionSection({ isOpen, disabled = false }) {
                   ) : null}
                   {!configured ? (
                     <p className="profile-mail-meta">
-                      OAuth ar inte aktiverat i backend for {resolveProviderLabel(providerId)}.
+                      OAuth är inte aktiverat i backend för {resolveProviderLabel(providerId)}.
                     </p>
                   ) : null}
                 </div>
@@ -221,7 +221,7 @@ export default function MailConnectionSection({ isOpen, disabled = false }) {
                       onClick={() => handleDisconnect(providerId)}
                       disabled={disabled || loading || busy}
                     >
-                      {busy ? "Kopplar fran..." : "Koppla fran"}
+                      {busy ? "Kopplar från..." : "Koppla från"}
                     </button>
                   ) : (
                     <button
@@ -271,8 +271,8 @@ function consumeMailOauthParams() {
   const message =
     rawMessage ||
     (status === "success"
-      ? `${providerLabel} ar nu kopplat.`
-      : `Kopplingen mot ${providerLabel} kunde inte genomforas.`);
+      ? `${providerLabel} är nu kopplat.`
+      : `Kopplingen mot ${providerLabel} kunde inte genomföras.`);
 
   url.searchParams.delete("mail_oauth_status");
   url.searchParams.delete("mail_oauth_provider");
