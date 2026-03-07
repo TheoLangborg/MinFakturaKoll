@@ -69,7 +69,7 @@ export default function SiteFooter() {
                 <section key={section.heading} className="legal-section">
                   <h4>{section.heading}</h4>
                   {section.paragraphs.map((paragraph) => (
-                    <p key={paragraph}>{paragraph}</p>
+                    <p key={paragraph}>{renderParagraphWithMailLinks(paragraph)}</p>
                   ))}
                   {Array.isArray(section.bullets) && section.bullets.length ? (
                     <ul>
@@ -86,4 +86,37 @@ export default function SiteFooter() {
       )}
     </>
   );
+}
+
+function renderParagraphWithMailLinks(paragraph) {
+  const text = String(paragraph || "");
+  const emailPattern = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\.[a-zA-Z]{2,}/g;
+  const matches = [...text.matchAll(emailPattern)];
+  if (!matches.length) return text;
+
+  const fragments = [];
+  let cursor = 0;
+
+  for (const match of matches) {
+    const email = String(match[0] || "").trim();
+    const index = Number(match.index);
+    if (!email || !Number.isFinite(index)) continue;
+
+    if (index > cursor) {
+      fragments.push(text.slice(cursor, index));
+    }
+
+    fragments.push(
+      <a key={`${email}-${index}`} href={`mailto:${email}`} className="legal-email-link">
+        {email}
+      </a>
+    );
+    cursor = index + email.length;
+  }
+
+  if (cursor < text.length) {
+    fragments.push(text.slice(cursor));
+  }
+
+  return fragments;
 }

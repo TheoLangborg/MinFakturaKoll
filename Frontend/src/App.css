@@ -162,6 +162,17 @@
   line-height: 1.58;
 }
 
+.legal-email-link {
+  color: var(--accent-ink);
+  text-decoration: underline;
+  text-decoration-thickness: 1px;
+  text-underline-offset: 2px;
+}
+
+.legal-email-link:hover {
+  color: var(--accent-strong);
+}
+
 .legal-section ul {
   margin: 8px 0 0;
   padding-left: 18px;
