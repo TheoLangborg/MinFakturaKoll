@@ -98,7 +98,9 @@ function resolveAllowedOrigins() {
 }
 
 function normalizeOrigin(value) {
-  let raw = String(value || "").trim();
+  let raw = String(value || "")
+    .trim()
+    .replace(/^['"`]+|['"`]+$/g, "");
   if (!raw) return "";
 
   if (!/^https?:\/\//i.test(raw)) {
