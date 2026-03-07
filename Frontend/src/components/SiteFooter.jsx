@@ -71,6 +71,13 @@ export default function SiteFooter() {
                   {section.paragraphs.map((paragraph) => (
                     <p key={paragraph}>{paragraph}</p>
                   ))}
+                  {Array.isArray(section.bullets) && section.bullets.length ? (
+                    <ul>
+                      {section.bullets.map((bullet) => (
+                        <li key={bullet}>{bullet}</li>
+                      ))}
+                    </ul>
+                  ) : null}
                 </section>
               ))}
             </div>

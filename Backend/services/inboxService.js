@@ -5,6 +5,7 @@ import { getFirebaseInitError, getFirestoreDb } from "./firebaseAdminService.js"
 const DEFAULT_INBOX_COLLECTION = "inboxes";
 const INBOX_TOKEN_BYTES = 18; // base64url -> 24 chars
 const MAX_TOKEN_ATTEMPTS = 8;
+const DELETE_BATCH_SIZE = 300;
 
 export async function createOrGetInboxForUser(userId) {
   const db = getFirestoreDb();
@@ -74,6 +75,55 @@ export async function createOrGetInboxForUser(userId) {
       reason: `Inbox-adressen kunde inte skapas just nu. Detalj: ${message}`,
     };
   }
+}
+
+export async function deactivateInboxesForUser(userId) {
+  const db = getFirestoreDb();
+  if (!db) {
+    return {
+      ok: false,
+      reason:
+        getFirebaseInitError() ||
+        "Inbox-tjansten ar inte tillganglig eftersom Firestore saknar konfiguration i backend.",
+    };
+  }
+
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId) {
+    return {
+      ok: false,
+      reason: "Kunde inte identifiera anvandaren for inbox-radering.",
+    };
+  }
+
+  const collectionRef = getInboxCollectionRef(db);
+  let deactivatedCount = 0;
+
+  while (true) {
+    const snapshot = await collectionRef.where("uid", "==", safeUserId).limit(DELETE_BATCH_SIZE).get();
+    if (snapshot.empty) break;
+
+    const batch = db.batch();
+    snapshot.docs.forEach((doc) => {
+      batch.set(
+        doc.ref,
+        {
+          isActive: false,
+          deactivatedAt: FieldValue.serverTimestamp(),
+          updatedAt: FieldValue.serverTimestamp(),
+          deactivatedReason: "account_purge",
+        },
+        { merge: true }
+      );
+    });
+    await batch.commit();
+    deactivatedCount += snapshot.docs.length;
+  }
+
+  return {
+    ok: true,
+    deactivatedCount,
+  };
 }
 
 function getInboxCollectionRef(db) {

@@ -1,0 +1,42 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+    function signedIn() {
+      return request.auth != null;
+    }
+
+    // Optional client read for own history (backend handles all writes via Admin SDK).
+    match /invoice_history/{docId} {
+      allow read: if signedIn() && resource.data.userId == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Optional client read for own inbound alias, never client write.
+    match /inboxes/{token} {
+      allow read: if signedIn() && resource.data.uid == request.auth.uid;
+      allow write: if false;
+    }
+
+    // Sensitive collections must never be exposed to Firebase client SDK.
+    match /mail_oauth_connections/{docId} {
+      allow read, write: if false;
+    }
+
+    match /mail_oauth_states/{docId} {
+      allow read, write: if false;
+    }
+
+    match /invoices/{docId} {
+      allow read, write: if false;
+    }
+
+    match /inboundEmails/{docId} {
+      allow read, write: if false;
+    }
+
+    // Default deny.
+    match /{document=**} {
+      allow read, write: if false;
+    }
+  }
+}

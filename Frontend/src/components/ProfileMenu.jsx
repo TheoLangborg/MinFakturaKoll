@@ -5,6 +5,7 @@ import {
   updateAccountPassword,
   updateAccountProfile,
 } from "../services/authService.js";
+import MailConnectionSection from "./MailConnectionSection.jsx";
 import { apiFetch } from "../utils/apiClient.js";
 import { toUserErrorMessage } from "../utils/errorText.js";
 
@@ -409,6 +410,8 @@ export default function ProfileMenu({ session, onLogout }) {
                 </div>
                 {inboxError ? <p className="profile-inline-error">{inboxError}</p> : null}
               </section>
+
+              <MailConnectionSection isOpen={profileOpen} disabled={loading} />
 
               <section className="profile-section profile-danger-zone">
                 <h4>Farlig zon</h4>

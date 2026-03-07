@@ -1,3 +1,4 @@
+import crypto from "node:crypto";
 import express from "express";
 import {
   parseMailgunInboundPayload,
@@ -13,6 +14,14 @@ const router = express.Router();
 
 router.post("/inbound", async (req, res) => {
   try {
+    const ipGate = verifyWebhookIpAllowlist(req);
+    if (!ipGate.ok) {
+      return res.status(403).json({
+        ok: false,
+        error: ipGate.reason || "Webhook source IP ar inte tillaten.",
+      });
+    }
+
     const parsed = await parseMailgunInboundPayload(req);
 
     const signature = verifyMailgunSignature(parsed.fields);
@@ -43,8 +52,10 @@ router.post("/inbound", async (req, res) => {
 
     const attachmentValidation = validateInboundAttachments(parsed.attachments, parsed.limits);
     if (!attachmentValidation.ok) {
+      const tokenRef = fingerprint(recipient.token);
+      const userRef = fingerprint(inbox.uid);
       console.warn(
-        `[mailgun inbound] blocked token=${recipient.token} uid=${inbox.uid} reason="${
+        `[mailgun inbound] blocked tokenRef=${tokenRef} userRef=${userRef} reason="${
           attachmentValidation.reason || "invalid_attachments"
         }"`
       );
@@ -58,8 +69,10 @@ router.post("/inbound", async (req, res) => {
 
     const quota = await reserveInboxDailyQuota(recipient.token, attachmentValidation.attachmentCount);
     if (!quota.ok) {
+      const tokenRef = fingerprint(recipient.token);
+      const userRef = fingerprint(inbox.uid);
       console.warn(
-        `[mailgun inbound] blocked token=${recipient.token} uid=${inbox.uid} reason="${
+        `[mailgun inbound] blocked tokenRef=${tokenRef} userRef=${userRef} reason="${
           quota.reason || "quota_exceeded"
         }"`
       );
@@ -79,8 +92,10 @@ router.post("/inbound", async (req, res) => {
       attachments: attachmentValidation.attachments,
     });
     if (!processed.ok) {
+      const tokenRef = fingerprint(recipient.token);
+      const userRef = fingerprint(inbox.uid);
       console.warn(
-        `[mailgun inbound] processing-failed token=${recipient.token} uid=${inbox.uid} reason="${
+        `[mailgun inbound] processing-failed tokenRef=${tokenRef} userRef=${userRef} reason="${
           processed.reason || "processing_error"
         }"`
       );
@@ -94,9 +109,13 @@ router.post("/inbound", async (req, res) => {
     const attachmentCount = attachmentValidation.attachmentCount;
     const from = readField(parsed.fields, ["from"]);
     const subject = readField(parsed.fields, ["subject"]);
+    const tokenRef = fingerprint(recipient.token);
+    const userRef = fingerprint(inbox.uid);
+    const fromDomain = extractEmailDomain(from);
+    const subjectLength = String(subject || "").length;
 
     console.log(
-      `[mailgun inbound] token=${recipient.token} uid=${inbox.uid} attachments=${attachmentCount} accepted=${processed.acceptedCount} duplicates=${processed.duplicateCount} errors=${processed.errorCount} from="${from}" subject="${subject}" quota=${quota.dailyCount}/${quota.dailyLimit}`
+      `[mailgun inbound] tokenRef=${tokenRef} userRef=${userRef} attachments=${attachmentCount} accepted=${processed.acceptedCount} duplicates=${processed.duplicateCount} errors=${processed.errorCount} fromDomain=${fromDomain || "-"} subjectLength=${subjectLength} quota=${quota.dailyCount}/${quota.dailyLimit}`
     );
 
     return res.status(202).json({
@@ -131,6 +150,71 @@ function readField(fields = {}, keys = []) {
     if (text) return text;
   }
   return "";
+}
+
+function fingerprint(value) {
+  const safe = String(value || "").trim();
+  if (!safe) return "-";
+  return crypto.createHash("sha256").update(safe).digest("hex").slice(0, 12);
+}
+
+function extractEmailDomain(value) {
+  const safe = String(value || "").trim().toLowerCase();
+  const match = safe.match(/@([a-z0-9.-]+\.[a-z]{2,})/i);
+  return match?.[1] || "";
+}
+
+function verifyWebhookIpAllowlist(req) {
+  const allowlistRaw = String(process.env.MAILGUN_WEBHOOK_ALLOWED_IPS || "").trim();
+  if (!allowlistRaw) {
+    return { ok: true };
+  }
+
+  const allowlist = new Set(
+    allowlistRaw
+      .split(",")
+      .map((value) => String(value || "").trim())
+      .filter(Boolean)
+  );
+  if (!allowlist.size) {
+    return { ok: true };
+  }
+
+  const clientIp = resolveClientIp(req);
+  if (!clientIp) {
+    return {
+      ok: false,
+      reason: "Webhook source IP kunde inte verifieras.",
+    };
+  }
+
+  if (!allowlist.has(clientIp)) {
+    return {
+      ok: false,
+      reason: "Webhook source IP ar inte tillaten.",
+    };
+  }
+
+  return { ok: true };
+}
+
+function resolveClientIp(req) {
+  const forwardedFor = String(req.headers["x-forwarded-for"] || "")
+    .split(",")[0]
+    .trim();
+  const safeForwarded = normalizeIp(forwardedFor);
+  if (safeForwarded) return safeForwarded;
+
+  const reqIp = normalizeIp(req.ip);
+  if (reqIp) return reqIp;
+
+  return "";
+}
+
+function normalizeIp(value) {
+  const raw = String(value || "").trim();
+  if (!raw) return "";
+  return raw.replace(/^::ffff:/i, "");
 }
 
 export default router;

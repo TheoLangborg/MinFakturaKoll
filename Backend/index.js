@@ -8,14 +8,29 @@ import marketRoute from "./routes/marketRoute.js";
 import accountRoute from "./routes/accountRoute.js";
 import inboxRoute from "./routes/inboxRoute.js";
 import mailgunWebhookRoute from "./routes/mailgunWebhookRoute.js";
+import mailConnectionRoute from "./routes/mailConnectionRoute.js";
 import devRoute from "./routes/devRoute.js";
+import { applySecurityHeaders } from "./middleware/securityHeaders.js";
+import {
+  accountRateLimiter,
+  devRouteRateLimiter,
+  globalApiRateLimiter,
+  inboxRateLimiter,
+  mailConnectionRateLimiter,
+  scanRateLimiter,
+  webhookRateLimiter,
+} from "./middleware/requestLimiter.js";
 import { startInboundInvoiceWorker } from "./services/mailgunInboundInvoiceService.js";
+import { cleanupExpiredOauthStates } from "./services/mailOAuthService.js";
 
 dotenv.config();
 
 const app = express();
 const allowedOrigins = resolveAllowedOrigins();
 const port = Number(process.env.PORT || 3001);
+
+app.disable("x-powered-by");
+app.set("trust proxy", shouldTrustProxy() ? 1 : false);
 
 app.use(
   cors({
@@ -39,24 +54,33 @@ app.use(
   })
 );
 
+app.use(applySecurityHeaders);
 app.use(express.json({ limit: "35mb" }));
+app.use("/api", globalApiRateLimiter);
 
 app.get("/health", (req, res) => res.json({ ok: true, ts: Date.now() }));
-app.use("/api", scanRoute);
+app.use("/api", scanRateLimiter, scanRoute);
 app.use("/api/history", historyRoute);
 app.use("/api/market", marketRoute);
-app.use("/api/account", accountRoute);
-app.use("/api/inbox", inboxRoute);
+app.use("/api/account", accountRateLimiter, accountRoute);
+app.use("/api/inbox", inboxRateLimiter, inboxRoute);
+app.use("/api/mail-connections", mailConnectionRateLimiter, mailConnectionRoute);
 app.use("/api/test", testRoute);
-app.use("/webhooks/mailgun", mailgunWebhookRoute);
-app.use("/dev", devRoute);
+app.use("/webhooks/mailgun", webhookRateLimiter, mailgunWebhookRoute);
+app.use("/dev", devRouteRateLimiter, devRoute);
 
 startInboundInvoiceWorker();
+startOauthStateCleanupWorker();
 
-app.listen(port, () => {
+const server = app.listen(port, () => {
   console.log(`[cors] Allowed frontend origins: ${[...allowedOrigins].join(", ")}`);
   console.log(`MinFakturaKoll backend startad: http://localhost:${port}`);
 });
+
+const requestTimeoutMs = clampNumber(process.env.SERVER_REQUEST_TIMEOUT_MS, 180000, 30000, 900000);
+const headersTimeoutMs = clampNumber(process.env.SERVER_HEADERS_TIMEOUT_MS, 185000, 35000, 920000);
+server.requestTimeout = requestTimeoutMs;
+server.headersTimeout = Math.max(headersTimeoutMs, requestTimeoutMs + 5000);
 
 function resolveAllowedOrigins() {
   const originsFromList = String(process.env.FRONTEND_ORIGINS || "")
@@ -91,4 +115,39 @@ function normalizeOrigin(value) {
   } catch {
     return "";
   }
+}
+
+function shouldTrustProxy() {
+  const value = String(process.env.TRUST_PROXY || "true").trim().toLowerCase();
+  return value !== "false";
+}
+
+function startOauthStateCleanupWorker() {
+  const enabled = String(process.env.OAUTH_STATE_CLEANUP_ENABLED || "true").trim().toLowerCase();
+  if (enabled === "false") return;
+
+  const intervalMs = clampNumber(process.env.OAUTH_STATE_CLEANUP_INTERVAL_SEC, 3600, 60, 86400) * 1000;
+
+  const timer = setInterval(() => {
+    void cleanupExpiredOauthStates()
+      .then((result) => {
+        if (result?.ok && Number(result.deletedCount || 0) > 0) {
+          console.log(`[mail oauth] cleanup deleted=${result.deletedCount}`);
+        }
+      })
+      .catch((error) => {
+        const message = error instanceof Error ? error.message : String(error || "unknown error");
+        console.warn(`[mail oauth] cleanup failed: ${message}`);
+      });
+  }, intervalMs);
+
+  if (typeof timer.unref === "function") {
+    timer.unref();
+  }
+}
+
+function clampNumber(value, fallback, min, max) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.min(max, Math.max(min, Math.floor(parsed)));
 }

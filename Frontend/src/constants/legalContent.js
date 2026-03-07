@@ -1,30 +1,69 @@
+export const LEGAL_POLICY_VERSIONS = {
+  privacy: "2026-03-07",
+  terms: "2026-03-07",
+  cookies: "2026-03-07",
+  security: "2026-03-07",
+  oauth: "2026-03-07",
+};
+
 export const LEGAL_PAGES = [
   {
     id: "privacy",
     label: "Privacy",
     title: "Integritetspolicy",
-    updatedAt: "27 februari 2026",
+    updatedAt: "7 mars 2026",
     sections: [
+      {
+        heading: "Personuppgiftsansvarig och omfattning",
+        paragraphs: [
+          "MinFakturaKoll ar personuppgiftsansvarig for behandling av data som sker i tjansten.",
+          "Policyn galler all behandling i app, backend, support och e-postintegrationer for fakturahantering.",
+        ],
+      },
       {
         heading: "Vilka uppgifter vi behandlar",
         paragraphs: [
-          "Vi behandlar uppgifter du själv anger i appen, exempelvis e-post, fakturainformation och metadata om uppladdade filer.",
-          "Vi behandlar inte fler personuppgifter än vad som behövs för analys, historik och förbättring av tjänstens funktion.",
+          "Vi behandlar kontodata (e-post, uid, visningsnamn), fakturainnehall, metadata och anvandarens handlingar i appen.",
+          "Om du kopplar Gmail/Outlook via OAuth behandlas endast data som kravs for fakturaimport och felhantering.",
+        ],
+        bullets: [
+          "Kontodata: e-post, sessionsdata, autentiseringsstatus",
+          "Fakturadata: leverantor, belopp, datum, OCR, bilagor, analysresultat",
+          "Sakerhetsdata: loggar, felkoder, abuse- och incidentspar",
+          "Integrationsdata: provider, scopes, krypterade OAuth-token, kopplingsstatus",
         ],
       },
       {
-        heading: "Syfte och rättslig grund",
+        heading: "Syfte och rattslig grund (GDPR)",
         paragraphs: [
-          "Personuppgifter används för att leverera tjänsten, spara historik per användare och skapa relevanta analyser.",
-          "Behandling sker främst med stöd av avtal och, där det är tillämpligt, berättigat intresse för säker drift.",
+          "Behandling sker for att tillhandahalla tjansten, ge support, uppratthalla saker drift och mojliggora frivillig e-postimport.",
+          "Rattslig grund ar i huvudsak avtal, rattslig forpliktelse och berattigat intresse. For OAuth-import anvands uttryckligt samtycke i appen.",
         ],
       },
       {
-        heading: "Lagring och radering",
+        heading: "Dataminimering, lagring och radering",
         paragraphs: [
-          "Uppgifter lagras så länge kontot är aktivt eller tills du själv raderar konto via Profilinställningar.",
-          "När konto raderas i appen raderas även fakturahistorik och relaterad användardata kopplad till kontot.",
-          "Du kan också kontakta support för registerutdrag eller frågor om personuppgifter.",
+          "Vi behandlar inte mer data an nodvandigt och begransar atkomst efter roll och behov.",
+          "Data sparas sa lange kontot ar aktivt eller tills radering begars i Profil. Viss data kan sparas langre om lagkrav eller incidentutredning kraver det.",
+        ],
+        bullets: [
+          "Kontoradering tar bort historik, mailkopplingar och tillhorande metadata",
+          "OAuth-koppling kan kopplas fran separat utan att kontot raderas",
+          "Raderingsbegaran hanteras utan onodigt drojsmal",
+        ],
+      },
+      {
+        heading: "Dina rattigheter",
+        paragraphs: [
+          "Du har ratt till tillgang, rattelse, radering, begransning, dataportabilitet och invandning enligt GDPR.",
+          "Begaran skickas till privacy@minfakturakoll.se. Vi kan behova verifiera identitet innan utlammning.",
+        ],
+      },
+      {
+        heading: "Overforing och underbitraden",
+        paragraphs: [
+          "Vi kan anvanda drifts- och molnleverantorer som personuppgiftsbitraden med personuppgiftsbitradesavtal.",
+          "Om overforing till land utanfor EU/EES sker anvands tillampliga skyddsatgarder, exempelvis standardavtalsklausuler.",
         ],
       },
     ],
@@ -32,29 +71,42 @@ export const LEGAL_PAGES = [
   {
     id: "terms",
     label: "Terms",
-    title: "Användarvillkor",
-    updatedAt: "27 februari 2026",
+    title: "Anvandarvillkor",
+    updatedAt: "7 mars 2026",
     sections: [
       {
-        heading: "Användning av tjänsten",
+        heading: "Anvandning av tjansten",
         paragraphs: [
-          "Tjänsten är avsedd för laglig hantering av egna fakturor och kostnadsunderlag.",
-          "Du ansvarar för att uppladdat material får användas och inte bryter mot lag eller avtal.",
+          "Tjansten ar avsedd for laglig hantering av egna fakturor och kostnadsunderlag.",
+          "Du ansvarar for att uppladdat eller importerad data far behandlas av dig enligt tillamplig lag och avtal.",
         ],
       },
       {
-        heading: "Ansvarsbegränsning",
+        heading: "Konto och sakerhet",
         paragraphs: [
-          "Analysresultat är beslutsstöd och utgör inte juridisk eller finansiell rådgivning.",
-          "Du ansvarar själv för slutliga beslut, avtal med leverantörer och faktiska besparingsutfall.",
+          "Du ansvarar for att skydda inloggningsuppgifter och att inte dela kontot med obehoriga.",
+          "Vid misstankt intrang ska du omedelbart byta losenord och kontakta support.",
         ],
       },
       {
-        heading: "Tillgång och konto",
+        heading: "E-postimport och OAuth",
         paragraphs: [
-          "Du ansvarar för att skydda inloggningsuppgifter och rapportera misstänkt obehörig användning.",
-          "Du kan när som helst avsluta ditt konto i Profilinställningar. Kontoradering är permanent och kan inte ångras.",
-          "Vi kan stänga av konto vid missbruk, säkerhetsrisk eller brott mot dessa villkor.",
+          "Gmail/Outlook-koppling ar frivillig och kraver aktivt godkannande i Profilinstallningar.",
+          "Du kan nar som helst koppla fran integrationen. Fran koppling stoppar fortsatt automatiserad behandling via OAuth-kopplingen.",
+        ],
+      },
+      {
+        heading: "Ansvarsbegransning",
+        paragraphs: [
+          "Analys och rekommendationer ar beslutsstod och utgor inte juridisk eller finansiell radgivning.",
+          "Vi ansvarar inte for indirekta skador, utebliven besparing eller beslut som tas pa basis av analyserna.",
+        ],
+      },
+      {
+        heading: "Otillaten anvandning",
+        paragraphs: [
+          "Det ar inte tillatet att ladda upp skadlig kod, genomfora intrangsforsok eller missbruka API:er.",
+          "Vi kan begransa eller stanga konto vid brott mot villkor, sakerhetsrisk eller lagkrav.",
         ],
       },
     ],
@@ -62,51 +114,115 @@ export const LEGAL_PAGES = [
   {
     id: "cookies",
     label: "Cookies",
-    title: "Cookiepolicy",
-    updatedAt: "27 februari 2026",
+    title: "Cookie- och lagringspolicy",
+    updatedAt: "7 mars 2026",
     sections: [
       {
-        heading: "Vad som används",
+        heading: "Vad vi lagrar lokalt",
         paragraphs: [
-          "Appen använder nödvändiga lagringsmekanismer för inloggning och sessionshantering.",
-          "Vi använder inte onödiga spårningscookies i appens standardflöde.",
+          "Appen anvander nodvandig lagring for inloggning, sessionsfornyelse och grundlaggande anvandarupplevelse.",
+          "Vi anvander inte marknadsforingscookies i standardflodet.",
+        ],
+        bullets: [
+          "Sessionsdata for inloggning",
+          "Val for vyer och tillfalliga tillstand i appen",
+          "Sakerhetsrelaterad lagring for OAuth-floden",
         ],
       },
       {
-        heading: "Hur du kan påverka",
+        heading: "Rattslig grund for cookies",
         paragraphs: [
-          "Du kan logga ut och rensa lokal data i webbläsaren för att ta bort sparad sessionsinformation.",
-          "Vid kontoradering i appen tas även serverlagrad historik bort för användaren.",
-          "Vissa funktioner kan sluta fungera om nödvändig lagring blockeras i webbläsaren.",
+          "Nodvandig lagring anvands for att leverera en uttryckligen begard digital tjanst.",
+          "Icke-nodvandig lagring aktiveras inte utan separat stod i produkt och policy.",
+        ],
+      },
+      {
+        heading: "Hur du kan paverka",
+        paragraphs: [
+          "Du kan rensa lokal lagring i webblasaren och logga ut for att ta bort sparad session.",
+          "Om nodvandig lagring blockeras kan centrala funktioner, inklusive OAuth-login, sluta fungera.",
         ],
       },
     ],
   },
   {
     id: "security",
-    label: "Säkerhet",
-    title: "Säkerhet och dataskydd",
-    updatedAt: "27 februari 2026",
+    label: "Sakerhet",
+    title: "Sakerhet och dataskydd",
+    updatedAt: "7 mars 2026",
     sections: [
       {
-        heading: "Tekniskt skydd",
+        heading: "Tekniska skydd",
         paragraphs: [
-          "Trafik till backend skickas över säkra anslutningar i produktionsmiljö.",
-          "Åtkomst till historik begränsas per inloggad användare.",
+          "Trafik till backend skyddas med TLS i produktionsmiljo och atkomst kontrolleras per autentiserad anvandare.",
+          "Kansliga integrationshemligheter hanteras med principen om minsta privilegium.",
+        ],
+        bullets: [
+          "Autentisering via verifierad token",
+          "Segregerad dataatkomst per uid",
+          "Loggning av kritiska handelser och fel",
+          "Kryptering av OAuth-token i vila",
+        ],
+      },
+      {
+        heading: "OAuth-sakerhet",
+        paragraphs: [
+          "OAuth-kopplingar anvander state-parameter och PKCE for att minska risk for CSRF och kodinterception.",
+          "Scope ar begransade till minsta nodvandiga niva for fakturaimport.",
         ],
       },
       {
         heading: "Incidenthantering",
         paragraphs: [
-          "Vi arbetar med loggning och övervakning för att upptäcka drift- och säkerhetsproblem.",
-          "Vid allvarliga incidenter informeras berörda användare enligt tillämpliga regler.",
+          "Vi overvakar drift och sakerhet for att upptacka avvikelser, missbruk och driftstorningar.",
+          "Vid personuppgiftsincidenter agerar vi enligt GDPR inklusive anmalan till IMY dar sa kravs.",
         ],
       },
       {
-        heading: "Kontoradering",
+        heading: "Kontoradering och fran koppling",
         paragraphs: [
-          "Konto kan raderas i Profilinställningar efter bekräftelse. Då raderas konto och historikdata kopplad till användaren.",
-          "Om åtgärden kräver ny inloggning kan du behöva logga ut och logga in igen innan radering.",
+          "Kontoradering i Profil raderar historik och relaterade integrationer enligt produktens raderingsflode.",
+          "Fran koppling av mailprovider kan goras separat utan att hela kontot tas bort.",
+        ],
+      },
+    ],
+  },
+  {
+    id: "oauth",
+    label: "E-post OAuth",
+    title: "E-postintegration (Gmail och Outlook)",
+    updatedAt: "7 mars 2026",
+    sections: [
+      {
+        heading: "Vad kopplingen gor",
+        paragraphs: [
+          "OAuth-kopplingen gor det mojligt att i framtiden importera fakturor automatiskt fran din e-post.",
+          "Kopplingen ar frivillig och aktiveras endast efter att du kryssat i samtycken i Profil.",
+        ],
+      },
+      {
+        heading: "Vilken data som behandlas",
+        paragraphs: [
+          "Syftet ar att identifiera fakturor och bilagor for analys i MinFakturaKoll.",
+        ],
+        bullets: [
+          "Avsandare, amne, datum och mottagare for relevanta meddelanden",
+          "Bilagor som ser ut som fakturor (exempelvis PDF, bild)",
+          "Teknisk metadata for felsokning och spam/abuse-skydd",
+        ],
+      },
+      {
+        heading: "Vad vi inte gor",
+        paragraphs: [
+          "Vi saljer inte data vidare och anvander inte innehallet for annonsering.",
+          "Vi begar inte bredare OAuth-scope an vad importfunktionen kraver.",
+        ],
+      },
+      {
+        heading: "Samtycke och aterkallelse",
+        paragraphs: [
+          "Samtycke loggas med tidpunkt och policyversion nar kopplingen skapas.",
+          "Du kan nar som helst koppla fran Gmail/Outlook i Profil, vilket stoppar fortsatt behandling via kopplingen.",
         ],
       },
     ],
@@ -114,23 +230,31 @@ export const LEGAL_PAGES = [
   {
     id: "contact",
     label: "Kontakt",
-    title: "Kontakt och support",
-    updatedAt: "27 februari 2026",
+    title: "Kontakt, support och dataskydd",
+    updatedAt: "7 mars 2026",
     sections: [
       {
-        heading: "Support",
+        heading: "Support och driftfragor",
         paragraphs: [
-          "För frågor om appen, datahantering eller kontot kan du kontakta support@minfakturakoll.se.",
-          "Beskriv gärna ärendet med skärmbild och tidpunkt för snabbare felsökning.",
+          "Kontakt: support@minfakturakoll.se",
+          "Bifoga garna tidpunkt, felmeddelande och skarmbild for snabbare felsokning.",
         ],
       },
       {
-        heading: "Juridiska frågor",
+        heading: "Integritet och GDPR-begaran",
         paragraphs: [
-          "Frågor om integritet, registerutdrag eller radering skickas till privacy@minfakturakoll.se.",
-          "Självservice för kontoradering finns också i Profilinställningar i appen.",
+          "Kontakt: privacy@minfakturakoll.se",
+          "Ange arende: registerutdrag, rattelse, radering, begransning eller dataportabilitet.",
+        ],
+      },
+      {
+        heading: "Sakerhetsrapportering",
+        paragraphs: [
+          "Misstankta sakerhetsbrister eller missbruk rapporteras till security@minfakturakoll.se.",
+          "Skicka aldrig losenord eller fullstandiga kortuppgifter via e-post.",
         ],
       },
     ],
   },
 ];
+

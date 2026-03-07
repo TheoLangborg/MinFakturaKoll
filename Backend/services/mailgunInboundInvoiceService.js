@@ -61,6 +61,7 @@ export async function processInboundAttachments({
   const subject = readField(fields, ["subject"]);
   const receivedAt =
     readField(fields, ["Date", "date", "message-headers"]) || new Date().toISOString();
+  const tokenFingerprint = fingerprintToken(token);
 
   const createdInvoiceIds = [];
   const inboundLogIds = [];
@@ -102,7 +103,7 @@ export async function processInboundAttachments({
         const logId = await logInboundEmail({
           db,
           uid: safeUid,
-          token,
+          token: tokenFingerprint,
           recipient,
           from,
           subject,
@@ -131,7 +132,7 @@ export async function processInboundAttachments({
             uid: safeUid,
             sha256,
             source: "email",
-            token: String(token || ""),
+            tokenRef: tokenFingerprint,
           },
         },
       });
@@ -155,13 +156,13 @@ export async function processInboundAttachments({
           receivedAt,
           recipient,
         },
-        inboxToken: String(token || ""),
+        inboxTokenRef: tokenFingerprint,
       });
 
       const logId = await logInboundEmail({
         db,
         uid: safeUid,
-        token,
+        token: tokenFingerprint,
         recipient,
         from,
         subject,
@@ -183,7 +184,7 @@ export async function processInboundAttachments({
       const logId = await logInboundEmail({
         db,
         uid: safeUid,
-        token,
+        token: tokenFingerprint,
         recipient,
         from,
         subject,
@@ -371,7 +372,7 @@ async function analyzeQueuedInvoice(invoiceId) {
     );
 
     console.log(
-      `[mailgun inbound] analyzed invoiceId=${invoiceId} uid=${uid} historyId=${historyId || "-"}`
+      `[mailgun inbound] analyzed invoiceId=${invoiceId} userRef=${fingerprintToken(uid)} historyId=${historyId || "-"}`
     );
   } catch (error) {
     const reason = toErrorReason(error, "Inbound analysis failed.");
@@ -384,7 +385,9 @@ async function analyzeQueuedInvoice(invoiceId) {
       },
       { merge: true }
     );
-    console.error(`[mailgun inbound] invoice error invoiceId=${invoiceId} uid=${uid}: ${reason}`);
+    console.error(
+      `[mailgun inbound] invoice error invoiceId=${invoiceId} userRef=${fingerprintToken(uid)}: ${reason}`
+    );
   }
 }
 
@@ -432,7 +435,7 @@ async function logInboundEmail({
   try {
     const logRef = await getInboundEmailCollectionRef(db).add({
       uid: String(uid || "").trim(),
-      token: String(token || "").trim(),
+      tokenRef: String(token || "").trim(),
       recipient: String(recipient || "").trim(),
       emailMeta: {
         from: String(from || "").trim(),
@@ -579,4 +582,10 @@ function toErrorReason(error, fallbackMessage) {
     return error.message.trim().slice(0, 300);
   }
   return String(fallbackMessage || "Unknown inbound processing error.");
+}
+
+function fingerprintToken(value) {
+  const safe = String(value || "").trim();
+  if (!safe) return "";
+  return crypto.createHash("sha256").update(safe).digest("hex").slice(0, 16);
 }
