@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+﻿import { useEffect, useState } from "react";
 import { apiFetch } from "../utils/apiClient.js";
 import { toUserErrorMessage } from "../utils/errorText.js";
 
@@ -21,7 +21,7 @@ export default function ImportInboxBadge() {
         });
         const json = await response.json();
         if (!response.ok || !json.ok) {
-          throw new Error(json.error || "Kunde inte hämta import-mail.");
+          throw new Error(json.error || "Kunde inte hämta importmejl.");
         }
 
         if (!cancelled) {
@@ -29,7 +29,7 @@ export default function ImportInboxBadge() {
         }
       } catch (caughtError) {
         if (!cancelled) {
-          setError(toUserErrorMessage(caughtError, "Kunde inte hämta import-mail."));
+          setError(toUserErrorMessage(caughtError, "Kunde inte hämta importmejl."));
           setInboxAddress("");
         }
       } finally {
@@ -54,11 +54,11 @@ export default function ImportInboxBadge() {
       });
       const json = await response.json();
       if (!response.ok || !json.ok) {
-        throw new Error(json.error || "Kunde inte uppdatera import-mail.");
+        throw new Error(json.error || "Kunde inte uppdatera importmejl.");
       }
       setInboxAddress(String(json.inboxAddress || "").trim());
     } catch (caughtError) {
-      setError(toUserErrorMessage(caughtError, "Kunde inte uppdatera import-mail."));
+      setError(toUserErrorMessage(caughtError, "Kunde inte uppdatera importmejl."));
     } finally {
       setRefreshing(false);
     }
@@ -83,8 +83,8 @@ export default function ImportInboxBadge() {
   if (loading) {
     return (
       <div className="import-inbox-chip">
-        <span className="import-inbox-label">Maila in fakturor</span>
-        <strong className="import-inbox-value">Skapar adress...</strong>
+        <span className="import-inbox-label">Mejla in fakturor</span>
+        <strong className="import-inbox-value">Skapar adress…</strong>
       </div>
     );
   }
@@ -92,17 +92,17 @@ export default function ImportInboxBadge() {
   if (error || !inboxAddress) {
     return (
       <div className="import-inbox-chip">
-        <span className="import-inbox-label">Maila in fakturor</span>
-        <strong className="import-inbox-value">Import-mail saknas</strong>
+        <span className="import-inbox-label">Mejla in fakturor</span>
+        <strong className="import-inbox-value">Importmejl saknas</strong>
         <button
           type="button"
           className="import-inbox-copy-btn"
           onClick={refreshInboxAddress}
           disabled={refreshing}
-          title="Försök hämta import-mail igen"
-          aria-label="Försök hämta import-mail igen"
+          title="Försök hämta importmejl igen"
+          aria-label="Försök hämta importmejl igen"
         >
-          {refreshing ? "Laddar..." : "Försök igen"}
+          {refreshing ? "Laddar…" : "Försök igen"}
         </button>
       </div>
     );
@@ -111,15 +111,15 @@ export default function ImportInboxBadge() {
   return (
     <div
       className="import-inbox-chip"
-      title="Vidarebefordra PDF eller bildfakturor hit. Analysen sparas automatiskt i historiken."
+      title="Vidarebefordra PDF- eller bildfakturor hit. Analysen sparas automatiskt i historiken."
     >
-      <span className="import-inbox-label">Maila in fakturor</span>
+      <span className="import-inbox-label">Mejla in fakturor</span>
       <strong className="import-inbox-value">{inboxAddress}</strong>
       <button
         type="button"
         className="import-inbox-copy-btn"
         onClick={copyInboxAddress}
-        aria-label="Kopiera import-mail"
+        aria-label="Kopiera importmejl"
       >
         {copyState === "copied" ? "Kopierad" : copyState === "error" ? "Misslyckades" : "Kopiera"}
       </button>

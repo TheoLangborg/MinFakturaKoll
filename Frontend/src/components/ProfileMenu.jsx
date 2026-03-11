@@ -9,10 +9,17 @@ import MailConnectionSection from "./MailConnectionSection.jsx";
 import { apiFetch } from "../utils/apiClient.js";
 import { toUserErrorMessage } from "../utils/errorText.js";
 
-export default function ProfileMenu({ session, onLogout }) {
+export default function ProfileMenu({
+  session,
+  onLogout,
+  openMailSetupRequest = 0,
+  onMailConnectionsUpdated = null,
+}) {
   const wrapRef = useRef(null);
+  const mailSectionRef = useRef(null);
   const [menuOpen, setMenuOpen] = useState(false);
   const [profileOpen, setProfileOpen] = useState(false);
+  const [focusMailSection, setFocusMailSection] = useState(false);
   const [displayName, setDisplayName] = useState("");
   const [email, setEmail] = useState("");
   const [newPassword, setNewPassword] = useState("");
@@ -62,7 +69,7 @@ export default function ProfileMenu({ session, onLogout }) {
         }
       } catch (caughtError) {
         if (!cancelled) {
-          setInboxError(toUserErrorMessage(caughtError, "Kunde inte hämta import-mail."));
+          setInboxError(toUserErrorMessage(caughtError, "Kunde inte hämta importmejl."));
         }
       } finally {
         if (!cancelled) {
@@ -76,6 +83,27 @@ export default function ProfileMenu({ session, onLogout }) {
       cancelled = true;
     };
   }, [inboxAddress, inboxLoading, profileOpen]);
+
+  useEffect(() => {
+    if (!openMailSetupRequest) return;
+    setMenuOpen(false);
+    setProfileOpen(true);
+    setFocusMailSection(true);
+  }, [openMailSetupRequest]);
+
+  useEffect(() => {
+    if (!profileOpen || !focusMailSection) return;
+
+    const frameId = window.requestAnimationFrame(() => {
+      mailSectionRef.current?.scrollIntoView({
+        behavior: "smooth",
+        block: "start",
+      });
+      setFocusMailSection(false);
+    });
+
+    return () => window.cancelAnimationFrame(frameId);
+  }, [focusMailSection, profileOpen]);
 
   useEffect(() => {
     function handleKeyDown(event) {
@@ -171,9 +199,9 @@ export default function ProfileMenu({ session, onLogout }) {
     setLoading(true);
     try {
       await sendPasswordResetEmail(resetEmail);
-      setInfo("Återställningsmail skickat.");
+      setInfo("Återställningsmejl skickat.");
     } catch (caughtError) {
-      setError(toUserErrorMessage(caughtError, "Kunde inte skicka återställningsmail."));
+      setError(toUserErrorMessage(caughtError, "Kunde inte skicka återställningsmejl."));
     } finally {
       setLoading(false);
     }
@@ -214,7 +242,7 @@ export default function ProfileMenu({ session, onLogout }) {
       const address = await requestInboxAddress();
       setInboxAddress(address);
     } catch (caughtError) {
-      setInboxError(toUserErrorMessage(caughtError, "Kunde inte uppdatera import-mail."));
+      setInboxError(toUserErrorMessage(caughtError, "Kunde inte uppdatera importmejl."));
     } finally {
       setInboxLoading(false);
     }
@@ -361,7 +389,7 @@ export default function ProfileMenu({ session, onLogout }) {
                     disabled={loading}
                     onClick={handlePasswordReset}
                   >
-                    Skicka återställningsmail
+                    Skicka återställningsmejl
                   </button>
                   <button
                     type="button"
@@ -375,7 +403,7 @@ export default function ProfileMenu({ session, onLogout }) {
               </section>
 
               <section className="profile-section">
-                <h4>Maila in fakturor</h4>
+                <h4>Mejla in fakturor</h4>
                 <p>Vidarebefordra PDF- och bildfakturor hit. Analysen sparas automatiskt i historiken.</p>
                 <div className="profile-inbox-row">
                   <input
@@ -383,8 +411,8 @@ export default function ProfileMenu({ session, onLogout }) {
                     readOnly
                     value={
                       inboxLoading
-                        ? "Skapar import-mail..."
-                        : inboxAddress || "Ingen import-mail tillgänglig"
+                        ? "Skapar importmejl..."
+                        : inboxAddress || "Inget importmejl tillgängligt"
                     }
                   />
                   <button
@@ -411,7 +439,13 @@ export default function ProfileMenu({ session, onLogout }) {
                 {inboxError ? <p className="profile-inline-error">{inboxError}</p> : null}
               </section>
 
-              <MailConnectionSection isOpen={profileOpen} disabled={loading} />
+              <div ref={mailSectionRef}>
+                <MailConnectionSection
+                  isOpen={profileOpen}
+                  disabled={loading}
+                  onConnectionsUpdated={onMailConnectionsUpdated}
+                />
+              </div>
 
               <section className="profile-section profile-danger-zone">
                 <h4>Farlig zon</h4>
@@ -454,7 +488,7 @@ async function requestInboxAddress() {
   const json = await response.json();
 
   if (!response.ok || !json.ok) {
-    throw new Error(json.error || "Kunde inte hämta import-mail.");
+    throw new Error(json.error || "Kunde inte hämta importmejl.");
   }
 
   return String(json.inboxAddress || "").trim();

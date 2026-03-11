@@ -1,4 +1,4 @@
-export default function HeroSection() {
+﻿export default function HeroSection() {
   return (
     <header className="hero">
       <p className="hero-kicker">MinFakturaKoll</p>

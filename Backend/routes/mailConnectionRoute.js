@@ -1,10 +1,17 @@
 import express from "express";
 import { requireAuth } from "../middleware/authMiddleware.js";
 import {
+  approveMailImportReview,
+  listMailImportReviews,
+  rejectMailImportReview,
+  runMailImportSync,
+} from "../services/mailImportService.js";
+import {
   completeMailConnectionCallback,
   disconnectMailConnection,
   getMailConnectionStatusForUser,
   startMailConnection,
+  updateMailImportSettings,
 } from "../services/mailOAuthService.js";
 
 const router = express.Router();
@@ -105,13 +112,133 @@ router.post("/disconnect/:provider", async (req, res) => {
       disconnected: Boolean(disconnected.disconnected),
       revokedUpstream: Boolean(disconnected.revokedUpstream),
       warning: disconnected.warning || "",
-      error: disconnected.ok ? "" : disconnected.reason || "Kunde inte koppla fran konto just nu.",
+      error: disconnected.ok ? "" : disconnected.reason || "Kunde inte koppla från konto just nu.",
     });
   } catch (error) {
     console.error("mailConnectionRoute disconnect misslyckades:", error);
     return res.status(500).json({
       ok: false,
-      error: "Kunde inte koppla fran konto just nu.",
+      error: "Kunde inte koppla från konto just nu.",
+    });
+  }
+});
+
+router.post("/:provider/settings", async (req, res) => {
+  try {
+    const updated = await updateMailImportSettings({
+      userId: req.user?.uid || "",
+      provider: req.params?.provider,
+      importTypes: req.body?.importTypes || {},
+    });
+
+    return res.status(updated.statusCode || (updated.ok ? 200 : 400)).json({
+      ok: Boolean(updated.ok),
+      provider: updated.provider || String(req.params?.provider || "").trim().toLowerCase(),
+      importTypes: updated.importTypes || {},
+      error: updated.ok ? "" : updated.reason || "Kunde inte spara importreglerna.",
+    });
+  } catch (error) {
+    console.error("mailConnectionRoute settings misslyckades:", error);
+    return res.status(500).json({
+      ok: false,
+      error: "Kunde inte spara importreglerna just nu.",
+    });
+  }
+});
+
+router.post("/:provider/sync-now", async (req, res) => {
+  try {
+    const synced = await runMailImportSync({
+      userId: req.user?.uid || "",
+      provider: req.params?.provider,
+      maxMessages: req.body?.maxMessages,
+    });
+
+    return res.status(synced.statusCode || (synced.ok ? 200 : 400)).json({
+      ok: Boolean(synced.ok),
+      provider: synced.provider || String(req.params?.provider || "").trim().toLowerCase(),
+      stats: synced.stats || {},
+      pendingReviewCount: synced.pendingReviewCount || 0,
+      importTypes: synced.importTypes || {},
+      message: synced.message || "",
+      error: synced.ok ? "" : synced.reason || "Kunde inte starta mailsynken.",
+    });
+  } catch (error) {
+    console.error("mailConnectionRoute sync misslyckades:", error);
+    return res.status(500).json({
+      ok: false,
+      error: "Kunde inte starta mailsynken just nu.",
+    });
+  }
+});
+
+router.get("/:provider/reviews", async (req, res) => {
+  try {
+    const reviews = await listMailImportReviews({
+      userId: req.user?.uid || "",
+      provider: req.params?.provider,
+      limit: req.query?.limit,
+    });
+
+    return res.status(reviews.statusCode || (reviews.ok ? 200 : 400)).json({
+      ok: Boolean(reviews.ok),
+      provider: String(req.params?.provider || "").trim().toLowerCase(),
+      items: Array.isArray(reviews.items) ? reviews.items : [],
+      error: reviews.ok ? "" : reviews.reason || "Kunde inte hamta granskningskon.",
+    });
+  } catch (error) {
+    console.error("mailConnectionRoute reviews misslyckades:", error);
+    return res.status(500).json({
+      ok: false,
+      error: "Kunde inte hamta granskningskon just nu.",
+    });
+  }
+});
+
+router.post("/:provider/reviews/:reviewId/approve", async (req, res) => {
+  try {
+    const approved = await approveMailImportReview({
+      userId: req.user?.uid || "",
+      provider: req.params?.provider,
+      reviewId: req.params?.reviewId,
+    });
+
+    return res.status(approved.statusCode || (approved.ok ? 200 : 400)).json({
+      ok: Boolean(approved.ok),
+      action: approved.action || "",
+      acceptedCount: approved.acceptedCount || 0,
+      duplicateCount: approved.duplicateCount || 0,
+      errorCount: approved.errorCount || 0,
+      pendingReviewCount: approved.pendingReviewCount || 0,
+      error: approved.ok ? "" : approved.reason || "Kunde inte godkänna meddelandet.",
+    });
+  } catch (error) {
+    console.error("mailConnectionRoute approve misslyckades:", error);
+    return res.status(500).json({
+      ok: false,
+      error: "Kunde inte godkänna meddelandet just nu.",
+    });
+  }
+});
+
+router.post("/:provider/reviews/:reviewId/reject", async (req, res) => {
+  try {
+    const rejected = await rejectMailImportReview({
+      userId: req.user?.uid || "",
+      provider: req.params?.provider,
+      reviewId: req.params?.reviewId,
+    });
+
+    return res.status(rejected.statusCode || (rejected.ok ? 200 : 400)).json({
+      ok: Boolean(rejected.ok),
+      action: rejected.action || "",
+      error: rejected.ok ? "" : rejected.reason || "Kunde inte avvisa meddelandet.",
+    });
+  } catch (error) {
+    console.error("mailConnectionRoute reject misslyckades:", error);
+    return res.status(500).json({
+      ok: false,
+      error: "Kunde inte avvisa meddelandet just nu.",
     });
   }
 });

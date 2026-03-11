@@ -92,7 +92,7 @@ export async function deactivateInboxesForUser(userId) {
   if (!safeUserId) {
     return {
       ok: false,
-      reason: "Kunde inte identifiera anvandaren for inbox-radering.",
+      reason: "Kunde inte identifiera användaren för inboxradering.",
     };
   }
 

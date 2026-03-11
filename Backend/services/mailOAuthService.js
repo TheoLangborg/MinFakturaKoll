@@ -8,6 +8,22 @@ const STATE_TTL_MS = 10 * 60 * 1000;
 const DELETE_BATCH_SIZE = 300;
 const STATE_CLEANUP_INTERVAL_MS = 30 * 60 * 1000;
 const STATE_CLEANUP_BATCH_SIZE = 200;
+const TOKEN_REFRESH_SKEW_MS = 2 * 60 * 1000;
+
+const DEFAULT_IMPORT_TYPES = Object.freeze({
+  invoices: true,
+  receipts: false,
+  confirmations: false,
+});
+
+const DEFAULT_SYNC_STATS = Object.freeze({
+  scanned: 0,
+  importedMessages: 0,
+  importedAttachments: 0,
+  queuedForReview: 0,
+  blocked: 0,
+  errors: 0,
+});
 
 let lastStateCleanupAt = 0;
 let stateCleanupInProgress = false;
@@ -23,12 +39,7 @@ const PROVIDER_CONFIG = {
     clientIdEnvName: "GOOGLE_OAUTH_CLIENT_ID",
     clientSecretEnvName: "GOOGLE_OAUTH_CLIENT_SECRET",
     redirectUriEnvName: "GOOGLE_OAUTH_REDIRECT_URI",
-    defaultScopes: [
-      "openid",
-      "email",
-      "profile",
-      "https://www.googleapis.com/auth/gmail.readonly",
-    ],
+    defaultScopes: ["https://www.googleapis.com/auth/gmail.readonly"],
   },
   outlook: {
     id: "outlook",
@@ -78,7 +89,7 @@ export async function getMailConnectionStatusForUser(userId) {
       ok: false,
       enabled: true,
       providers: [],
-      reason: "Kunde inte identifiera anvandaren.",
+      reason: "Kunde inte identifiera användaren.",
       statusCode: 400,
     };
   }
@@ -108,7 +119,12 @@ export async function getMailConnectionStatusForUser(userId) {
       consentApprovedAt: toIsoTimestamp(data?.consent?.approvedAt),
       scopes: normalizeScopesArray(data.scopes),
       autoImportEnabled: Boolean(data?.sync?.autoImportEnabled),
+      importTypes: normalizeImportTypes(data?.sync?.importTypes),
       lastSyncAt: toIsoTimestamp(data?.sync?.lastSyncAt),
+      lastSyncStatus: String(data?.sync?.lastSyncStatus || "").trim(),
+      lastSyncMessage: String(data?.sync?.lastSyncMessage || "").trim(),
+      lastSyncStats: normalizeSyncStats(data?.sync?.lastSyncStats),
+      pendingReviewCount: clampPositiveInt(data?.sync?.pendingReviewCount, 0),
       warning: String(data?.metadata?.warning || "").trim(),
     });
   }
@@ -149,7 +165,7 @@ export async function startMailConnection({
     return {
       ok: false,
       statusCode: 400,
-      reason: "Kunde inte identifiera anvandaren.",
+      reason: "Kunde inte identifiera användaren.",
     };
   }
 
@@ -263,7 +279,7 @@ export async function completeMailConnectionCallback({
     return {
       ok: false,
       statusCode: 400,
-      reason: "Okand provider i OAuth callback.",
+      reason: "Okänd leverantör i OAuth-callback.",
     };
   }
 
@@ -454,7 +470,14 @@ export async function completeMailConnectionCallback({
     sync: {
       autoImportEnabled: false,
       mode: "manual_review",
-      lastSyncAt: null,
+      importTypes: normalizeImportTypes(existingData?.sync?.importTypes),
+      lastSyncAt: existingData?.sync?.lastSyncAt || null,
+      lastSyncStatus: String(existingData?.sync?.lastSyncStatus || "").trim(),
+      lastSyncMessage: String(existingData?.sync?.lastSyncMessage || "").trim(),
+      lastSyncStats: normalizeSyncStats(existingData?.sync?.lastSyncStats),
+      pendingReviewCount: clampPositiveInt(existingData?.sync?.pendingReviewCount, 0),
+      importedMessageIds: normalizeImportedMessageIds(existingData?.sync?.importedMessageIds),
+      lastCursorInternalDateMs: clampPositiveInt(existingData?.sync?.lastCursorInternalDateMs, 0),
       updatedAt: FieldValue.serverTimestamp(),
     },
     metadata: {
@@ -508,7 +531,7 @@ export async function disconnectMailConnection({ userId, provider }) {
     return {
       ok: false,
       statusCode: 400,
-      reason: "Kunde inte identifiera anvandaren.",
+      reason: "Kunde inte identifiera användaren.",
     };
   }
 
@@ -538,7 +561,7 @@ export async function disconnectMailConnection({ userId, provider }) {
     return {
       ok: false,
       statusCode: 403,
-      reason: "Du saknar behorighet till den har kopplingen.",
+      reason: "Du saknar behörighet till den här kopplingen.",
     };
   }
 
@@ -582,7 +605,14 @@ export async function disconnectMailConnection({ userId, provider }) {
       sync: {
         autoImportEnabled: false,
         mode: "disabled",
+        importTypes: normalizeImportTypes(data?.sync?.importTypes),
         lastSyncAt: null,
+        lastSyncStatus: "",
+        lastSyncMessage: "",
+        lastSyncStats: normalizeSyncStats(data?.sync?.lastSyncStats),
+        pendingReviewCount: 0,
+        importedMessageIds: normalizeImportedMessageIds(data?.sync?.importedMessageIds),
+        lastCursorInternalDateMs: clampPositiveInt(data?.sync?.lastCursorInternalDateMs, 0),
         updatedAt: FieldValue.serverTimestamp(),
       },
       metadata: {
@@ -598,6 +628,253 @@ export async function disconnectMailConnection({ userId, provider }) {
     provider: providerId,
     revokedUpstream,
     warning: revokeWarning,
+  };
+}
+
+export async function updateMailImportSettings({ userId, provider, importTypes }) {
+  const db = getFirestoreDb();
+  if (!db) {
+    return {
+      ok: false,
+      statusCode: 503,
+      reason:
+        getFirebaseInitError() ||
+        "Mailkopplingar ar inte tillgangliga eftersom Firestore saknar konfiguration.",
+    };
+  }
+
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Kunde inte identifiera användaren.",
+    };
+  }
+
+  const providerId = normalizeProvider(provider);
+  if (!providerId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Vald mailprovider stodjs inte.",
+    };
+  }
+
+  const connectionRef = getConnectionCollectionRef(db).doc(buildConnectionDocId(safeUserId, providerId));
+  const snapshot = await connectionRef.get();
+  if (!snapshot.exists) {
+    return {
+      ok: false,
+      statusCode: 404,
+      reason: "Mailkopplingen finns inte.",
+    };
+  }
+
+  const data = snapshot.data() || {};
+  if (String(data.uid || "").trim() !== safeUserId) {
+    return {
+      ok: false,
+      statusCode: 403,
+      reason: "Du saknar behörighet till den här kopplingen.",
+    };
+  }
+
+  if (String(data.status || "").trim().toLowerCase() !== "connected") {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Mailkopplingen ar inte aktiv.",
+    };
+  }
+
+  const normalizedImportTypes = normalizeImportTypes(importTypes);
+  if (!hasAnyEnabledImportType(normalizedImportTypes)) {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Minst en importtyp maste vara vald.",
+    };
+  }
+
+  const previousImportTypes = normalizeImportTypes(data?.sync?.importTypes);
+  const broadenedSelection = didBroadenImportSelection(previousImportTypes, normalizedImportTypes);
+  const currentCursorMs = clampPositiveInt(data?.sync?.lastCursorInternalDateMs, 0);
+  const backfillCursorMs = Date.now() - resolveMailImportLookbackDays() * 24 * 60 * 60 * 1000;
+  const nextCursorMs = broadenedSelection
+    ? currentCursorMs > 0
+      ? Math.min(currentCursorMs, backfillCursorMs)
+      : backfillCursorMs
+    : currentCursorMs;
+
+  await connectionRef.set(
+    {
+      sync: {
+        ...(data?.sync || {}),
+        autoImportEnabled: false,
+        mode: "manual_review",
+        importTypes: normalizedImportTypes,
+        lastCursorInternalDateMs: nextCursorMs,
+        updatedAt: FieldValue.serverTimestamp(),
+      },
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+
+  return {
+    ok: true,
+    provider: providerId,
+    importTypes: normalizedImportTypes,
+  };
+}
+
+export async function getMailConnectionAccessContext({ userId, provider }) {
+  const db = getFirestoreDb();
+  if (!db) {
+    return {
+      ok: false,
+      statusCode: 503,
+      reason:
+        getFirebaseInitError() ||
+        "Mailkopplingar ar inte tillgangliga eftersom Firestore saknar konfiguration.",
+    };
+  }
+
+  const safeUserId = String(userId || "").trim();
+  if (!safeUserId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Kunde inte identifiera användaren.",
+    };
+  }
+
+  const providerId = normalizeProvider(provider);
+  if (!providerId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Vald mailprovider stodjs inte.",
+    };
+  }
+
+  const encryptionState = resolveTokenEncryptionState();
+  if (!encryptionState.ok) {
+    return {
+      ok: false,
+      statusCode: 503,
+      reason: encryptionState.reason,
+    };
+  }
+
+  const providerRuntime = resolveProviderRuntimeConfig(providerId, encryptionState);
+  if (!providerRuntime.configured) {
+    return {
+      ok: false,
+      statusCode: 503,
+      reason: `OAuth for ${providerRuntime.label} ar inte fullstandigt konfigurerad i backend.`,
+      missingConfig: providerRuntime.missingConfig,
+    };
+  }
+
+  const connectionRef = getConnectionCollectionRef(db).doc(buildConnectionDocId(safeUserId, providerId));
+  const snapshot = await connectionRef.get();
+  if (!snapshot.exists) {
+    return {
+      ok: false,
+      statusCode: 404,
+      reason: "Mailkopplingen finns inte.",
+    };
+  }
+
+  let data = snapshot.data() || {};
+  if (String(data.uid || "").trim() !== safeUserId) {
+    return {
+      ok: false,
+      statusCode: 403,
+      reason: "Du saknar behörighet till den här kopplingen.",
+    };
+  }
+
+  if (String(data.status || "").trim().toLowerCase() !== "connected") {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Mailkopplingen ar inte aktiv.",
+    };
+  }
+
+  let accessToken = decryptSecret(String(data.encryptedAccessToken || ""), encryptionState.key);
+  let refreshToken = decryptSecret(String(data.encryptedRefreshToken || ""), encryptionState.key);
+  const expiresAtMs = clampPositiveInt(data.tokenExpiresAtMs, 0);
+  const needsRefresh = !accessToken || expiresAtMs <= Date.now() + TOKEN_REFRESH_SKEW_MS;
+
+  if (needsRefresh) {
+    if (!refreshToken) {
+      return {
+        ok: false,
+        statusCode: 401,
+        reason: "Mailkopplingen saknar giltig refresh-token. Koppla kontot pa nytt.",
+      };
+    }
+
+    let refreshed = null;
+    try {
+      refreshed = await refreshProviderAccessToken({
+        providerRuntime,
+        refreshToken,
+      });
+    } catch (error) {
+      return {
+        ok: false,
+        statusCode: 401,
+        reason: toErrorMessage(error, "Kunde inte fornya access-token for mailkopplingen."),
+      };
+    }
+
+    accessToken = String(refreshed?.accessToken || "").trim();
+    refreshToken = String(refreshed?.refreshToken || "").trim() || refreshToken;
+    if (!accessToken) {
+      return {
+        ok: false,
+        statusCode: 401,
+        reason: "OAuth-provider returnerade ingen access-token vid fornyelse.",
+      };
+    }
+
+    const refreshedPayload = {
+      encryptedAccessToken: encryptSecret(accessToken, encryptionState.key),
+      encryptedRefreshToken: encryptSecret(refreshToken, encryptionState.key),
+      tokenExpiresAtMs: clampPositiveInt(refreshed?.tokenExpiresAtMs, Date.now() + 3600 * 1000),
+      updatedAt: FieldValue.serverTimestamp(),
+      metadata: {
+        ...(data?.metadata || {}),
+        lastTokenAt: FieldValue.serverTimestamp(),
+      },
+    };
+
+    await connectionRef.set(refreshedPayload, { merge: true });
+    data = {
+      ...data,
+      encryptedAccessToken: refreshedPayload.encryptedAccessToken,
+      encryptedRefreshToken: refreshedPayload.encryptedRefreshToken,
+      tokenExpiresAtMs: refreshedPayload.tokenExpiresAtMs,
+      metadata: {
+        ...(data?.metadata || {}),
+      },
+    };
+  }
+
+  return {
+    ok: true,
+    provider: providerId,
+    accessToken,
+    connectionRef,
+    connectionData: data,
+    accountEmail: String(data.accountEmail || "").trim(),
+    importTypes: normalizeImportTypes(data?.sync?.importTypes),
+    providerRuntime,
   };
 }
 
@@ -653,7 +930,7 @@ export async function purgeMailConnectionsForUser(userId) {
   if (!safeUserId) {
     return {
       ok: false,
-      reason: "Kunde inte identifiera anvandaren for mailkopplings-radering.",
+      reason: "Kunde inte identifiera användaren för borttagning av mejlkoppling.",
     };
   }
 
@@ -777,6 +1054,52 @@ async function exchangeCodeForTokens({ providerRuntime, code, codeVerifier }) {
   }
 
   return json || {};
+}
+
+async function refreshProviderAccessToken({ providerRuntime, refreshToken }) {
+  const safeRefreshToken = String(refreshToken || "").trim();
+  if (!safeRefreshToken) {
+    throw new Error("Refresh-token saknas for mailkopplingen.");
+  }
+
+  const payload = new URLSearchParams({
+    client_id: providerRuntime.clientId,
+    client_secret: providerRuntime.clientSecret,
+    grant_type: "refresh_token",
+    refresh_token: safeRefreshToken,
+  });
+
+  let response;
+  try {
+    response = await fetch(providerRuntime.tokenUrl, {
+      method: "POST",
+      headers: {
+        "Content-Type": "application/x-www-form-urlencoded",
+      },
+      body: payload,
+    });
+  } catch {
+    throw new Error("Kunde inte ansluta till OAuth-provider for tokenfornyelse.");
+  }
+
+  let json = null;
+  try {
+    json = await response.json();
+  } catch {
+    json = null;
+  }
+
+  if (!response.ok) {
+    const detail =
+      String(json?.error_description || "").trim() || String(json?.error || "").trim() || "okant fel";
+    throw new Error(`OAuth token refresh misslyckades: ${detail}`);
+  }
+
+  return {
+    accessToken: String(json?.access_token || "").trim(),
+    refreshToken: String(json?.refresh_token || "").trim(),
+    tokenExpiresAtMs: Date.now() + clampPositiveInt(json?.expires_in, 3600) * 1000,
+  };
 }
 
 async function resolveProviderAccountEmail(provider, accessToken) {
@@ -923,6 +1246,56 @@ function normalizePolicyVersions(policyVersions) {
     security: String(source.security || "").trim(),
     oauth: String(source.oauth || "").trim(),
   };
+}
+
+function normalizeImportTypes(importTypes) {
+  const source = importTypes && typeof importTypes === "object" ? importTypes : {};
+  return {
+    invoices: source.invoices !== false,
+    receipts: Boolean(source.receipts),
+    confirmations: Boolean(source.confirmations),
+  };
+}
+
+function normalizeSyncStats(stats) {
+  const source = stats && typeof stats === "object" ? stats : {};
+  return {
+    scanned: clampPositiveInt(source.scanned, DEFAULT_SYNC_STATS.scanned),
+    importedMessages: clampPositiveInt(
+      source.importedMessages,
+      DEFAULT_SYNC_STATS.importedMessages
+    ),
+    importedAttachments: clampPositiveInt(
+      source.importedAttachments,
+      DEFAULT_SYNC_STATS.importedAttachments
+    ),
+    queuedForReview: clampPositiveInt(
+      source.queuedForReview,
+      DEFAULT_SYNC_STATS.queuedForReview
+    ),
+    blocked: clampPositiveInt(source.blocked, DEFAULT_SYNC_STATS.blocked),
+    errors: clampPositiveInt(source.errors, DEFAULT_SYNC_STATS.errors),
+  };
+}
+
+function normalizeImportedMessageIds(value) {
+  const safeValues = Array.isArray(value) ? value : [];
+  return [...new Set(safeValues.map((entry) => String(entry || "").trim()).filter(Boolean))].slice(-200);
+}
+
+function hasAnyEnabledImportType(importTypes) {
+  const normalized = normalizeImportTypes(importTypes);
+  return Object.values(normalized).some(Boolean);
+}
+
+function didBroadenImportSelection(previousImportTypes, nextImportTypes) {
+  const previous = normalizeImportTypes(previousImportTypes);
+  const next = normalizeImportTypes(nextImportTypes);
+  return Object.keys(next).some((key) => Boolean(next[key]) && !Boolean(previous[key]));
+}
+
+function resolveMailImportLookbackDays() {
+  return clampPositiveInt(process.env.MAIL_IMPORT_SYNC_LOOKBACK_DAYS, 21);
 }
 
 function normalizeProvider(value) {
