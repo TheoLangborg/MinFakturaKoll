@@ -25,9 +25,33 @@ export async function apiFetch(path, options = {}) {
     );
   }
 
-  if (response.status === 401) {
+  if (response.status === 401 && (await shouldClearStoredSession(response))) {
     clearStoredAuthSession();
   }
 
   return response;
+}
+
+async function shouldClearStoredSession(response) {
+  if (!response || response.status !== 401) {
+    return false;
+  }
+
+  try {
+    const payload = await response.clone().json();
+    const message = String(payload?.error || payload?.reason || "").trim().toLowerCase();
+
+    if (!message) {
+      return true;
+    }
+
+    return (
+      message.includes("din session") ||
+      message.includes("sessionen har") ||
+      message.includes("logga in igen") ||
+      message.includes("ogiltig")
+    );
+  } catch {
+    return true;
+  }
 }

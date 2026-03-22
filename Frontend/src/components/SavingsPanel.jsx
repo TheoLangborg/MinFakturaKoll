@@ -17,7 +17,7 @@ export default function SavingsPanel({ items = [] }) {
   const recurringEntries = analysis.recurring;
   const hasData = recurringEntries.length > 0;
   const summary = analysis.summary;
-  const compareTargets = recurringEntries.slice(0, 30);
+  const compareTargets = useMemo(() => recurringEntries.slice(0, 30), [recurringEntries]);
   const monthDataCount = analysis.monthlyTotals.length;
 
   useEffect(() => {

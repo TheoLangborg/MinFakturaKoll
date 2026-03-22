@@ -2,6 +2,7 @@
 import { LEGAL_POLICY_VERSIONS } from "../constants/legalContent.js";
 import { apiFetch } from "../utils/apiClient.js";
 import { toUserErrorMessage } from "../utils/errorText.js";
+import { useRef } from "react";
 
 const CONSENT_ITEMS = [
   {
@@ -63,6 +64,8 @@ export default function MailConnectionSection({
   isOpen,
   disabled = false,
   onConnectionsUpdated = null,
+  onSyncFeedback = null,
+  refreshKey = 0,
 }) {
   const [loading, setLoading] = useState(false);
   const [providers, setProviders] = useState([]);
@@ -72,6 +75,9 @@ export default function MailConnectionSection({
   const [info, setInfo] = useState("");
   const [consent, setConsent] = useState(INITIAL_CONSENT);
   const [activeAction, setActiveAction] = useState("");
+  const wasOpenRef = useRef(false);
+  const skipNextRefreshRef = useRef(false);
+  const lastHandledRefreshKeyRef = useRef(refreshKey);
 
   const allConsentsAccepted = useMemo(
     () => CONSENT_ITEMS.every((item) => Boolean(consent[item.id])),
@@ -92,6 +98,15 @@ export default function MailConnectionSection({
     }
     return Array.isArray(json.items) ? json.items : [];
   }, []);
+
+  const notifyConnectionsUpdated = useCallback(() => {
+    if (!onConnectionsUpdated) {
+      return;
+    }
+
+    skipNextRefreshRef.current = true;
+    onConnectionsUpdated();
+  }, [onConnectionsUpdated]);
 
   const loadStatus = useCallback(
     async ({ preserveMessages = false } = {}) => {
@@ -117,7 +132,6 @@ export default function MailConnectionSection({
           nextReviews.gmail = await fetchReviewsForProvider("gmail");
         }
         setReviewsByProvider(nextReviews);
-        onConnectionsUpdated?.();
 
         if (json.encryptionWarning && !preserveMessages) {
           setError(String(json.encryptionWarning));
@@ -130,11 +144,23 @@ export default function MailConnectionSection({
         setLoading(false);
       }
     },
-    [fetchReviewsForProvider, onConnectionsUpdated]
+    [fetchReviewsForProvider]
   );
 
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      wasOpenRef.current = false;
+      lastHandledRefreshKeyRef.current = refreshKey;
+      skipNextRefreshRef.current = false;
+      return;
+    }
+
+    if (wasOpenRef.current) {
+      return;
+    }
+
+    wasOpenRef.current = true;
+    lastHandledRefreshKeyRef.current = refreshKey;
 
     const callbackMessage = consumeMailOauthParams();
     if (callbackMessage) {
@@ -148,9 +174,29 @@ export default function MailConnectionSection({
     }
 
     void loadStatus({
-      preserveMessages: Boolean(callbackMessage),
+      preserveMessages: Boolean(callbackMessage) || refreshKey > 0,
     });
-  }, [isOpen, loadStatus]);
+  }, [isOpen, loadStatus, refreshKey]);
+
+  useEffect(() => {
+    if (!isOpen) {
+      lastHandledRefreshKeyRef.current = refreshKey;
+      return;
+    }
+
+    if (refreshKey === lastHandledRefreshKeyRef.current) {
+      return;
+    }
+
+    lastHandledRefreshKeyRef.current = refreshKey;
+
+    if (skipNextRefreshRef.current) {
+      skipNextRefreshRef.current = false;
+      return;
+    }
+
+    void loadStatus({ preserveMessages: true });
+  }, [isOpen, loadStatus, refreshKey]);
 
   async function handleConnect(providerId) {
     if (!allConsentsAccepted) {
@@ -208,6 +254,7 @@ export default function MailConnectionSection({
 
       setInfo(`${resolveProviderLabel(providerId)} är frånkopplat.`);
       await loadStatus({ preserveMessages: true });
+      notifyConnectionsUpdated();
     } catch (caughtError) {
       setError(toUserErrorMessage(caughtError, "Kunde inte koppla från kontot."));
     } finally {
@@ -246,6 +293,7 @@ export default function MailConnectionSection({
 
       setInfo(`${resolveProviderLabel(providerId)} uppdaterades. Osäkra mejl hamnar i granskning.`);
       await loadStatus({ preserveMessages: true });
+      notifyConnectionsUpdated();
     } catch (caughtError) {
       setError(toUserErrorMessage(caughtError, "Kunde inte spara importreglerna."));
     } finally {
@@ -273,10 +321,23 @@ export default function MailConnectionSection({
         throw new Error(json.error || "Kunde inte starta mejlsynken.");
       }
 
-      setInfo(String(json.message || "Synken ar klar."));
+      setInfo(String(json.message || "Synken är klar."));
+      onSyncFeedback?.({
+        tone: "success",
+        message: String(json.message || "Synken är klar."),
+        provider: String(json.provider || providerId).trim().toLowerCase(),
+        stats: json.stats || {},
+        items: Array.isArray(json.items) ? json.items : [],
+      });
       await loadStatus({ preserveMessages: true });
+      notifyConnectionsUpdated();
     } catch (caughtError) {
-      setError(toUserErrorMessage(caughtError, "Kunde inte starta mejlsynken."));
+      const message = toUserErrorMessage(caughtError, "Kunde inte starta mejlsynken.");
+      setError(message);
+      onSyncFeedback?.({
+        tone: "error",
+        message,
+      });
     } finally {
       setActiveAction("");
     }
@@ -305,6 +366,7 @@ export default function MailConnectionSection({
           : "Meddelandet avvisades och kommer inte laddas upp."
       );
       await loadStatus({ preserveMessages: true });
+      notifyConnectionsUpdated();
     } catch (caughtError) {
       setError(toUserErrorMessage(caughtError, "Kunde inte behandla granskningsposten."));
     } finally {

@@ -14,6 +14,8 @@ export default function ProfileMenu({
   onLogout,
   openMailSetupRequest = 0,
   onMailConnectionsUpdated = null,
+  onMailSyncFeedback = null,
+  mailStatusRefreshKey = 0,
 }) {
   const wrapRef = useRef(null);
   const mailSectionRef = useRef(null);
@@ -444,6 +446,8 @@ export default function ProfileMenu({
                   isOpen={profileOpen}
                   disabled={loading}
                   onConnectionsUpdated={onMailConnectionsUpdated}
+                  onSyncFeedback={onMailSyncFeedback}
+                  refreshKey={mailStatusRefreshKey}
                 />
               </div>
 

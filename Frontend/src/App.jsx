@@ -9,6 +9,7 @@ import InvoiceInputPanel from "./components/InvoiceInputPanel.jsx";
 import ImportInboxBadge from "./components/ImportInboxBadge.jsx";
 import MailAutoImportHint from "./components/MailAutoImportHint.jsx";
 import MailSyncQuickActions from "./components/MailSyncQuickActions.jsx";
+import MailSyncResultsModal from "./components/MailSyncResultsModal.jsx";
 import PreviewModal from "./components/PreviewModal.jsx";
 import ProfileMenu from "./components/ProfileMenu.jsx";
 import SavingsAnalysisPage from "./components/SavingsAnalysisPage.jsx";
@@ -28,7 +29,8 @@ export default function App() {
   const [mailSetupRequest, setMailSetupRequest] = useState(0);
   const [mailStatusRefreshKey, setMailStatusRefreshKey] = useState(0);
   const [reviewToast, setReviewToast] = useState({ visible: false, count: 0 });
-  const [actionToast, setActionToast] = useState({ visible: false, tone: "success", message: "" });
+  const [actionToast, setActionToast] = useState(createEmptyActionToast);
+  const [syncDetailsOpen, setSyncDetailsOpen] = useState(false);
   const [dismissedReviewCount, setDismissedReviewCount] = useState(0);
   const history = useInvoiceHistory({ enabled: Boolean(session) });
   const loadHistory = history.loadHistory;
@@ -41,6 +43,8 @@ export default function App() {
     clearStoredAuthSession();
     setSession(null);
     setActiveView("scan");
+    setActionToast(createEmptyActionToast());
+    setSyncDetailsOpen(false);
   }
 
   const handleOpenMailSetup = useCallback(() => {
@@ -82,28 +86,83 @@ export default function App() {
     setReviewToast((prev) => ({ ...prev, visible: false }));
   }, [reviewToast.count]);
 
-  const handleMailSyncFeedback = useCallback((message, tone = "success") => {
-    if (!message) return;
+  const handleMailSyncFeedback = useCallback((payload, tone = "success") => {
+    const nextToast = normalizeActionToastPayload(payload, tone);
+    if (!nextToast.message) return;
+
     setActionToast({
       visible: true,
-      tone,
-      message,
+      ...nextToast,
     });
+    setSyncDetailsOpen(false);
   }, []);
 
   const handleDismissActionToast = useCallback(() => {
     setActionToast((prev) => ({ ...prev, visible: false }));
   }, []);
 
+  const handleOpenSyncDetails = useCallback(() => {
+    setActionToast((prev) => ({ ...prev, visible: false }));
+    setSyncDetailsOpen(true);
+  }, []);
+
+  const handleCloseSyncDetails = useCallback(() => {
+    setSyncDetailsOpen(false);
+  }, []);
+
+  const handleQueueBlockedSyncItem = useCallback((messageId, payload = {}) => {
+    setActionToast((prev) => {
+      const currentItems = Array.isArray(prev.items) ? prev.items : [];
+      const currentStats = prev.stats && typeof prev.stats === "object" ? prev.stats : {};
+      const targetItem = currentItems.find((item) => String(item?.id || "") === String(messageId || ""));
+      const nextItems = currentItems.map((item) => {
+        if (String(item?.id || "") !== String(messageId || "")) {
+          return item;
+        }
+
+        return {
+          ...item,
+          outcome: "review",
+          outcomeReason: String(payload.message || "Meddelandet skickades till manuell granskning."),
+          canQueueForReview: false,
+          selectedType: String(payload?.item?.selectedType || item?.selectedType || "").trim().toLowerCase(),
+          classification:
+            payload?.item?.classification && typeof payload.item.classification === "object"
+              ? payload.item.classification
+              : item?.classification,
+          attachmentCandidates: Array.isArray(payload?.item?.attachmentCandidates)
+            ? payload.item.attachmentCandidates
+            : item?.attachmentCandidates,
+        };
+      });
+
+      const nextStats = { ...currentStats };
+      if (String(targetItem?.outcome || "") === "blocked") {
+        nextStats.blocked = Math.max(0, Number(nextStats.blocked || 0) - 1);
+        nextStats.queuedForReview = Number(nextStats.queuedForReview || 0) + 1;
+      }
+
+      return {
+        ...prev,
+        stats: nextStats,
+        items: nextItems,
+        message: buildSyncSummaryToastMessage(nextStats),
+      };
+    });
+
+    handlePendingReviewChange(Number(payload.pendingReviewCount || 0));
+    handleMailStatusRefresh();
+  }, [handleMailStatusRefresh, handlePendingReviewChange]);
+
   useEffect(() => {
-    if (!actionToast.visible) return undefined;
+    if (!actionToast.visible || syncDetailsOpen) return undefined;
 
     const timerId = window.setTimeout(() => {
       setActionToast((prev) => ({ ...prev, visible: false }));
     }, 4800);
 
     return () => window.clearTimeout(timerId);
-  }, [actionToast.message, actionToast.tone, actionToast.visible]);
+  }, [actionToast.message, actionToast.tone, actionToast.visible, syncDetailsOpen]);
 
   function openQueueResult(itemId) {
     const opened = scanner.onShowQueueItemResult(itemId);
@@ -216,6 +275,8 @@ export default function App() {
               onLogout={handleLogout}
               openMailSetupRequest={mailSetupRequest}
               onMailConnectionsUpdated={handleMailStatusRefresh}
+              onMailSyncFeedback={handleMailSyncFeedback}
+              mailStatusRefreshKey={mailStatusRefreshKey}
             />
           </div>
         </div>
@@ -306,6 +367,13 @@ export default function App() {
         onClose={scanner.closePreview}
       />
 
+      <MailSyncResultsModal
+        open={syncDetailsOpen}
+        onClose={handleCloseSyncDetails}
+        syncResult={actionToast}
+        onQueueBlockedItem={handleQueueBlockedSyncItem}
+      />
+
       {actionToast.visible || reviewToast.visible ? (
         <div className="mail-toast-stack" aria-live="polite">
           {actionToast.visible ? (
@@ -313,11 +381,26 @@ export default function App() {
               className={`mail-review-toast mail-review-toast-${actionToast.tone || "info"}`}
               role="status"
             >
-              <div className="mail-review-toast-copy">
-                <strong>{actionToast.tone === "error" ? "Mejlstatus" : "Mejlsynk"}</strong>
-                <p>{actionToast.message}</p>
-              </div>
+              {Array.isArray(actionToast.items) && actionToast.items.length > 0 ? (
+                <button type="button" className="mail-review-toast-trigger" onClick={handleOpenSyncDetails}>
+                  <div className="mail-review-toast-copy">
+                    <strong>{actionToast.tone === "error" ? "Mejlstatus" : "Mejlsynk"}</strong>
+                    <p>{actionToast.message}</p>
+                    <span className="mail-review-toast-hint">Klicka för att visa detaljer</span>
+                  </div>
+                </button>
+              ) : (
+                <div className="mail-review-toast-copy">
+                  <strong>{actionToast.tone === "error" ? "Mejlstatus" : "Mejlsynk"}</strong>
+                  <p>{actionToast.message}</p>
+                </div>
+              )}
               <div className="mail-review-toast-actions">
+                {Array.isArray(actionToast.items) && actionToast.items.length > 0 ? (
+                  <button type="button" className="btn btn-secondary" onClick={handleOpenSyncDetails}>
+                    Visa detaljer
+                  </button>
+                ) : null}
                 <button type="button" className="mail-review-toast-close" onClick={handleDismissActionToast}>
                   Stäng
                 </button>
@@ -359,4 +442,57 @@ export default function App() {
       <SiteFooter />
     </div>
   );
+}
+
+function createEmptyActionToast() {
+  return {
+    visible: false,
+    tone: "success",
+    message: "",
+    provider: "",
+    stats: {},
+    items: [],
+  };
+}
+
+function normalizeActionToastPayload(payload, fallbackTone) {
+  if (typeof payload === "string") {
+    return {
+      tone: fallbackTone,
+      message: payload,
+      provider: "",
+      stats: {},
+      items: [],
+    };
+  }
+
+  const source = payload && typeof payload === "object" ? payload : {};
+
+  return {
+    tone: String(source.tone || fallbackTone || "success").trim().toLowerCase() || "success",
+    message: String(source.message || "").trim(),
+    provider: String(source.provider || "").trim().toLowerCase(),
+    stats: source.stats && typeof source.stats === "object" ? source.stats : {},
+    items: Array.isArray(source.items) ? source.items : [],
+  };
+}
+
+function buildSyncSummaryToastMessage(stats) {
+  const safeStats = stats && typeof stats === "object" ? stats : {};
+  const parts = [`${Number(safeStats.scanned || 0)} meddelanden skannades`];
+
+  if (Number(safeStats.importedMessages || 0) > 0) {
+    parts.push(`${Number(safeStats.importedMessages || 0)} autoimporterades`);
+  }
+  if (Number(safeStats.queuedForReview || 0) > 0) {
+    parts.push(`${Number(safeStats.queuedForReview || 0)} skickades till granskning`);
+  }
+  if (Number(safeStats.blocked || 0) > 0) {
+    parts.push(`${Number(safeStats.blocked || 0)} blockerades`);
+  }
+  if (Number(safeStats.errors || 0) > 0) {
+    parts.push(`${Number(safeStats.errors || 0)} gav fel`);
+  }
+
+  return `Synk klar: ${parts.join(", ")}.`;
 }

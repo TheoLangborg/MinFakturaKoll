@@ -814,7 +814,7 @@ export async function getMailConnectionAccessContext({ userId, provider }) {
     if (!refreshToken) {
       return {
         ok: false,
-        statusCode: 401,
+        statusCode: 409,
         reason: "Mailkopplingen saknar giltig refresh-token. Koppla kontot pa nytt.",
       };
     }
@@ -828,7 +828,7 @@ export async function getMailConnectionAccessContext({ userId, provider }) {
     } catch (error) {
       return {
         ok: false,
-        statusCode: 401,
+        statusCode: 409,
         reason: toErrorMessage(error, "Kunde inte fornya access-token for mailkopplingen."),
       };
     }
@@ -838,7 +838,7 @@ export async function getMailConnectionAccessContext({ userId, provider }) {
     if (!accessToken) {
       return {
         ok: false,
-        statusCode: 401,
+        statusCode: 409,
         reason: "OAuth-provider returnerade ingen access-token vid fornyelse.",
       };
     }

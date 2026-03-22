@@ -3,6 +3,7 @@ import { requireAuth } from "../middleware/authMiddleware.js";
 import {
   approveMailImportReview,
   listMailImportReviews,
+  queueBlockedMailImportReview,
   rejectMailImportReview,
   runMailImportSync,
 } from "../services/mailImportService.js";
@@ -160,6 +161,7 @@ router.post("/:provider/sync-now", async (req, res) => {
       stats: synced.stats || {},
       pendingReviewCount: synced.pendingReviewCount || 0,
       importTypes: synced.importTypes || {},
+      items: Array.isArray(synced.items) ? synced.items : [],
       message: synced.message || "",
       error: synced.ok ? "" : synced.reason || "Kunde inte starta mailsynken.",
     });
@@ -168,6 +170,32 @@ router.post("/:provider/sync-now", async (req, res) => {
     return res.status(500).json({
       ok: false,
       error: "Kunde inte starta mailsynken just nu.",
+    });
+  }
+});
+
+router.post("/:provider/messages/:messageId/queue-review", async (req, res) => {
+  try {
+    const queued = await queueBlockedMailImportReview({
+      userId: req.user?.uid || "",
+      provider: req.params?.provider,
+      messageId: req.params?.messageId,
+    });
+
+    return res.status(queued.statusCode || (queued.ok ? 200 : 400)).json({
+      ok: Boolean(queued.ok),
+      action: queued.action || "",
+      alreadyQueued: Boolean(queued.alreadyQueued),
+      pendingReviewCount: queued.pendingReviewCount || 0,
+      item: queued.item || null,
+      message: queued.message || "",
+      error: queued.ok ? "" : queued.reason || "Kunde inte skicka mejlet till granskning.",
+    });
+  } catch (error) {
+    console.error("mailConnectionRoute queue-review misslyckades:", error);
+    return res.status(500).json({
+      ok: false,
+      error: "Kunde inte skicka mejlet till granskning just nu.",
     });
   }
 });

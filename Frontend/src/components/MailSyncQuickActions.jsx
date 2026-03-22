@@ -76,12 +76,21 @@ export default function MailSyncQuickActions({
         throw new Error(json.error || "Kunde inte starta mejlsynken.");
       }
 
-      onSyncFeedback?.(String(json.message || "Synkningen är klar."));
+      onSyncFeedback?.({
+        tone: "success",
+        message: String(json.message || "Synkningen är klar."),
+        provider: String(json.provider || "gmail").trim().toLowerCase(),
+        stats: json.stats || {},
+        items: Array.isArray(json.items) ? json.items : [],
+      });
       await loadStatus();
     } catch (caughtError) {
       const message = toUserErrorMessage(caughtError, "Kunde inte starta mejlsynken.");
       setError(message);
-      onSyncFeedback?.(message, "error");
+      onSyncFeedback?.({
+        tone: "error",
+        message,
+      });
     } finally {
       setSyncing(false);
     }
@@ -94,7 +103,7 @@ export default function MailSyncQuickActions({
   const pendingReviewCount = Number(gmailProvider?.pendingReviewCount || 0);
   const lastSyncText = gmailProvider?.lastSyncAt
     ? formatTimestamp(gmailProvider.lastSyncAt)
-    : "Ingen synk ännu";
+    : "Ingen synk än";
   const summaryText =
     pendingReviewCount > 0
       ? `${pendingReviewCount} väntar på granskning`
@@ -115,7 +124,7 @@ export default function MailSyncQuickActions({
           </button>
         ) : null}
         <button type="button" className="btn btn-primary" onClick={handleSync} disabled={syncing}>
-          {syncing ? "Synkar…" : "Synka mejl"}
+          {syncing ? "Synkar..." : "Synka mejl"}
         </button>
       </div>
 

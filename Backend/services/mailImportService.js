@@ -180,6 +180,7 @@ export async function runMailImportSync({ userId, provider, maxMessages }) {
     blocked: 0,
     errors: 0,
   };
+  const items = [];
 
   let importedMessageIds = normalizeImportedMessageIds(access.connectionData?.sync?.importedMessageIds);
   let maxSeenInternalDateMs = resolveSyncCursorMs(access.connectionData);
@@ -203,6 +204,9 @@ export async function runMailImportSync({ userId, provider, maxMessages }) {
     stats.queuedForReview += result.queuedForReview;
     stats.blocked += result.blocked;
     stats.errors += result.errors;
+    if (result.detail) {
+      items.push(result.detail);
+    }
     if (result.importedMessageId) {
       importedMessageIds = normalizeImportedMessageIds([...importedMessageIds, result.importedMessageId]);
     }
@@ -242,6 +246,7 @@ export async function runMailImportSync({ userId, provider, maxMessages }) {
     stats,
     pendingReviewCount,
     importTypes,
+    items,
     message: buildSyncSummaryMessage(stats),
   };
 }
@@ -266,6 +271,134 @@ export async function rejectMailImportReview({ userId, provider, reviewId }) {
     reviewId,
     action: "reject",
   });
+}
+
+export async function queueBlockedMailImportReview({ userId, provider, messageId }) {
+  const db = getFirestoreDb();
+  if (!db) {
+    return {
+      ok: false,
+      statusCode: 503,
+      reason:
+        getFirebaseInitError() ||
+        "Mailimport är inte tillgänglig eftersom Firestore saknar konfiguration.",
+    };
+  }
+
+  const safeUserId = String(userId || "").trim();
+  const safeProvider = String(provider || "").trim().toLowerCase();
+  const safeMessageId = String(messageId || "").trim();
+  if (!safeUserId || !safeProvider || !safeMessageId) {
+    return {
+      ok: false,
+      statusCode: 400,
+      reason: "Ogiltig begäran för manuell granskning.",
+    };
+  }
+
+  if (safeProvider !== "gmail") {
+    return {
+      ok: false,
+      statusCode: 501,
+      reason: "Manuell granskning från blockerad synk stöds just nu bara för Gmail.",
+    };
+  }
+
+  const access = await getMailConnectionAccessContext({ userId: safeUserId, provider: safeProvider });
+  if (!access.ok) {
+    return access;
+  }
+
+  const reviewRef = getReviewCollectionRef(db).doc(buildReviewDocId(safeUserId, safeProvider, safeMessageId));
+  const existingReview = await reviewRef.get();
+  if (existingReview.exists) {
+    const status = String(existingReview.data()?.status || "").trim().toLowerCase();
+    if (status === "pending_review") {
+      const pendingReviewCount = await countPendingReviews({
+        db,
+        userId: safeUserId,
+        provider: safeProvider,
+      });
+
+      return {
+        ok: true,
+        action: "queued",
+        alreadyQueued: true,
+        message: "Meddelandet ligger redan i granskningskön.",
+        item: normalizeReviewItem(existingReview),
+        pendingReviewCount,
+      };
+    }
+
+    if (status === "imported" || status === "rejected") {
+      return {
+        ok: false,
+        statusCode: 409,
+        reason: resolveExistingReviewOutcomeReason(status),
+      };
+    }
+  }
+
+  let message = null;
+  try {
+    message = await fetchGmailMessage(access.accessToken, safeMessageId);
+  } catch (error) {
+    return {
+      ok: false,
+      statusCode: 502,
+      reason: toErrorMessage(error, "Kunde inte hämta Gmail-meddelandet för manuell granskning."),
+    };
+  }
+
+  const messageSummary = summarizeGmailMessage(message);
+  const decision = classifyGmailMessage({
+    message: messageSummary,
+    importTypes: normalizeImportTypes(access.importTypes),
+  });
+
+  if (!canQueueBlockedDecisionForManualReview(decision)) {
+    return {
+      ok: false,
+      statusCode: 409,
+      reason: resolveManualReviewOverrideDeniedReason(decision),
+    };
+  }
+
+  await storePendingReview({
+    reviewRef,
+    userId: safeUserId,
+    provider: safeProvider,
+    access,
+    messageSummary,
+    decision,
+    manualOverride: true,
+  });
+
+  const pendingReviewCount = await updatePendingReviewCount({
+    db,
+    userId: safeUserId,
+    provider: safeProvider,
+    connectionRef: access.connectionRef,
+  });
+
+  return {
+    ok: true,
+    action: "queued",
+    alreadyQueued: false,
+    message: "Meddelandet skickades till manuell granskning.",
+    item: normalizeReviewItem({
+      id: reviewRef.id,
+      ...buildPendingReviewData({
+        userId: safeUserId,
+        provider: safeProvider,
+        access,
+        messageSummary,
+        decision,
+        manualOverride: true,
+      }),
+    }),
+    pendingReviewCount,
+  };
 }
 
 async function processMessageRef({
@@ -295,6 +428,12 @@ async function processMessageRef({
       errors: 1,
       importedMessageId: "",
       internalDateMs: 0,
+      detail: buildSyncDetailItem({
+        provider,
+        messageId,
+        outcome: "error",
+        outcomeReason: "Kunde inte läsa meddelandet från Gmail.",
+      }),
     };
   }
 
@@ -310,6 +449,13 @@ async function processMessageRef({
       errors: 0,
       importedMessageId: "",
       internalDateMs: messageSummary.internalDateMs,
+      detail: buildSyncDetailItem({
+        provider,
+        messageId,
+        messageSummary,
+        outcome: "blocked",
+        outcomeReason: "Meddelandet var äldre än den senaste synkgränsen och hoppades över.",
+      }),
     };
   }
 
@@ -327,6 +473,13 @@ async function processMessageRef({
         errors: 0,
         importedMessageId: "",
         internalDateMs: messageSummary.internalDateMs,
+        detail: buildSyncDetailItem({
+          provider,
+          messageId,
+          messageSummary,
+          outcome: "blocked",
+          outcomeReason: resolveExistingReviewOutcomeReason(status),
+        }),
       };
     }
   }
@@ -346,6 +499,14 @@ async function processMessageRef({
       errors: 0,
       importedMessageId: "",
       internalDateMs: messageSummary.internalDateMs,
+      detail: buildSyncDetailItem({
+        provider,
+        messageId,
+        messageSummary,
+        decision,
+        outcome: "blocked",
+        outcomeReason: resolveBlockedDecisionOutcomeReason(decision),
+      }),
     };
   }
 
@@ -366,6 +527,14 @@ async function processMessageRef({
         errors: 1,
         importedMessageId: "",
         internalDateMs: messageSummary.internalDateMs,
+        detail: buildSyncDetailItem({
+          provider,
+          messageId,
+          messageSummary,
+          decision,
+          outcome: "error",
+          outcomeReason: imported.reason || "Bilagorna kunde inte importeras efter skanning.",
+        }),
       };
     }
 
@@ -405,30 +574,26 @@ async function processMessageRef({
       errors: 0,
       importedMessageId: messageId,
       internalDateMs: messageSummary.internalDateMs,
+      detail: buildSyncDetailItem({
+        provider,
+        messageId,
+        messageSummary,
+        decision,
+        outcome: "imported",
+        outcomeReason: buildImportedOutcomeReason(imported),
+        importResult: imported,
+      }),
     };
   }
 
-  await reviewRef.set(
-    {
-      uid: String(userId || "").trim(),
-      provider,
-      accountEmail: String(access.accountEmail || "").trim(),
-      messageId,
-      threadId: messageSummary.threadId,
-      status: "pending_review",
-      selectedType: decision.selectedType,
-      classification: decision.classification,
-      from: messageSummary.from,
-      subject: messageSummary.subject,
-      snippet: messageSummary.snippet,
-      textPreview: messageSummary.textPreview,
-      internalDateMs: messageSummary.internalDateMs,
-      attachmentCandidates: simplifyReviewAttachments(messageSummary.attachmentCandidates),
-      createdAt: FieldValue.serverTimestamp(),
-      updatedAt: FieldValue.serverTimestamp(),
-    },
-    { merge: true }
-  );
+  await storePendingReview({
+    reviewRef,
+    userId,
+    provider,
+    access,
+    messageSummary,
+    decision,
+  });
 
   return {
     scanned: 1,
@@ -439,6 +604,102 @@ async function processMessageRef({
     errors: 0,
     importedMessageId: "",
     internalDateMs: messageSummary.internalDateMs,
+    detail: buildSyncDetailItem({
+      provider,
+      messageId,
+      messageSummary,
+      decision,
+      outcome: "review",
+      outcomeReason: "Meddelandet skickades till manuell granskning innan import.",
+    }),
+  };
+}
+
+function buildSyncDetailItem({
+  provider,
+  messageId,
+  messageSummary = null,
+  decision = null,
+  outcome,
+  outcomeReason = "",
+  importResult = null,
+}) {
+  const summary = messageSummary && typeof messageSummary === "object" ? messageSummary : {};
+  const internalDateMs = clampNumber(summary.internalDateMs, 0, Number.MAX_SAFE_INTEGER, 0);
+
+  return {
+    id: String(messageId || summary.id || "").trim(),
+    provider: String(provider || "").trim().toLowerCase(),
+    outcome: normalizeSyncOutcome(outcome),
+    outcomeReason: String(outcomeReason || "").trim(),
+    canQueueForReview: canQueueBlockedDecisionForManualReview(decision),
+    from: String(summary.from || "").trim(),
+    subject: String(summary.subject || "").trim(),
+    snippet: String(summary.snippet || "").trim(),
+    textPreview: String(summary.textPreview || "").trim(),
+    internalDateMs,
+    receivedAtIso: internalDateMs > 0 ? new Date(internalDateMs).toISOString() : "",
+    attachmentCandidates: simplifyReviewAttachments(summary.attachmentCandidates),
+    classification: normalizeClassificationSummary(decision?.classification),
+    selectedType: String(
+      decision?.selectedType || decision?.classification?.selectedType || ""
+    )
+      .trim()
+      .toLowerCase(),
+    importResult: normalizeImportResult(importResult),
+  };
+}
+
+async function storePendingReview({
+  reviewRef,
+  userId,
+  provider,
+  access,
+  messageSummary,
+  decision,
+  manualOverride = false,
+}) {
+  await reviewRef.set(
+    {
+      ...buildPendingReviewData({
+        userId,
+        provider,
+        access,
+        messageSummary,
+        decision,
+        manualOverride,
+      }),
+      createdAt: FieldValue.serverTimestamp(),
+      updatedAt: FieldValue.serverTimestamp(),
+    },
+    { merge: true }
+  );
+}
+
+function buildPendingReviewData({
+  userId,
+  provider,
+  access,
+  messageSummary,
+  decision,
+  manualOverride = false,
+}) {
+  return {
+    uid: String(userId || "").trim(),
+    provider: String(provider || "").trim().toLowerCase(),
+    accountEmail: String(access?.accountEmail || "").trim(),
+    messageId: String(messageSummary?.id || "").trim(),
+    threadId: String(messageSummary?.threadId || "").trim(),
+    status: "pending_review",
+    selectedType: String(decision?.selectedType || "").trim().toLowerCase(),
+    classification: decision?.classification || {},
+    from: String(messageSummary?.from || "").trim(),
+    subject: String(messageSummary?.subject || "").trim(),
+    snippet: String(messageSummary?.snippet || "").trim(),
+    textPreview: String(messageSummary?.textPreview || "").trim(),
+    internalDateMs: clampNumber(messageSummary?.internalDateMs, 0, Number.MAX_SAFE_INTEGER, 0),
+    attachmentCandidates: simplifyReviewAttachments(messageSummary?.attachmentCandidates),
+    queueSource: manualOverride ? "manual_override" : "automatic_review",
   };
 }
 
@@ -870,6 +1131,95 @@ function buildClassificationReasons(scoreEntry) {
   return reasons;
 }
 
+function resolveExistingReviewOutcomeReason(status) {
+  const safeStatus = String(status || "").trim().toLowerCase();
+  if (safeStatus === "pending_review") {
+    return "Meddelandet ligger redan i granskningskon.";
+  }
+  if (safeStatus === "imported") {
+    return "Meddelandet har redan importerats tidigare.";
+  }
+  if (safeStatus === "rejected") {
+    return "Meddelandet har redan avvisats tidigare.";
+  }
+  return "Meddelandet har redan hanterats tidigare.";
+}
+
+function resolveBlockedDecisionOutcomeReason(decision) {
+  const classification = decision?.classification && typeof decision.classification === "object"
+    ? decision.classification
+    : {};
+
+  if (!classification.hasDocumentAttachment) {
+    return "Meddelandet saknade en tydlig PDF- eller bildbilaga.";
+  }
+
+  if (canQueueBlockedDecisionForManualReview(decision)) {
+    return "AI:n hittade vissa fakturasignaler men var inte säker nog. Du kan skicka mejlet till manuell granskning.";
+  }
+
+  if (clampNumber(classification.score, 0, 100, 0) <= 0) {
+    return "Meddelandet hade för svaga faktura- eller kvittosignaler för import.";
+  }
+
+  return "Meddelandet matchade inte dina importregler tillräckligt tydligt.";
+}
+
+function canQueueBlockedDecisionForManualReview(decision) {
+  const safeDecision = String(decision?.decision || "").trim().toLowerCase();
+  const classification = decision?.classification && typeof decision.classification === "object"
+    ? decision.classification
+    : {};
+  const selectedType = String(decision?.selectedType || classification.selectedType || "").trim().toLowerCase();
+  const score = clampNumber(classification.score, 0, 100, 0);
+
+  return (
+    safeDecision === "blocked" &&
+    Boolean(classification.hasDocumentAttachment) &&
+    Boolean(selectedType) &&
+    score > 0
+  );
+}
+
+function resolveManualReviewOverrideDeniedReason(decision) {
+  const classification = decision?.classification && typeof decision.classification === "object"
+    ? decision.classification
+    : {};
+
+  if (!classification.hasDocumentAttachment) {
+    return "Meddelandet kan inte skickas vidare eftersom det saknar en tydlig PDF- eller bildbilaga.";
+  }
+
+  if (clampNumber(classification.score, 0, 100, 0) <= 0) {
+    return "Meddelandet kan inte skickas vidare eftersom AI:n inte hittade tillräckliga fakturasignaler.";
+  }
+
+  return "Meddelandet kan inte skickas vidare manuellt just nu.";
+}
+
+function buildImportedOutcomeReason(imported) {
+  const acceptedCount = clampNumber(imported?.acceptedCount, 0, 100, 0);
+  const duplicateCount = clampNumber(imported?.duplicateCount, 0, 100, 0);
+  const errorCount = clampNumber(imported?.errorCount, 0, 100, 0);
+  const parts = [];
+
+  if (acceptedCount > 0) {
+    parts.push(`${acceptedCount} bilagor importerades`);
+  }
+  if (duplicateCount > 0) {
+    parts.push(`${duplicateCount} dubbletter hoppades over`);
+  }
+  if (errorCount > 0) {
+    parts.push(`${errorCount} bilagor gav fel`);
+  }
+
+  if (!parts.length) {
+    return "Meddelandet autoimporterades.";
+  }
+
+  return `${parts.join(", ")}.`;
+}
+
 function simplifyReviewAttachments(attachments) {
   return (Array.isArray(attachments) ? attachments : [])
     .map((attachment) => ({
@@ -911,29 +1261,55 @@ function normalizeReviewItem(snapshotOrData) {
     internalDateMs,
     receivedAtIso: internalDateMs > 0 ? new Date(internalDateMs).toISOString() : "",
     attachmentCandidates: simplifyReviewAttachments(data.attachmentCandidates),
-    classification: {
-      selectedType: String(classification.selectedType || data.selectedType || "").trim().toLowerCase(),
-      selectedLabel: String(classification.selectedLabel || "").trim(),
-      score: clampNumber(classification.score, 0, 100, 0),
-      marginToNext: clampNumber(classification.marginToNext, -100, 100, 0),
-      hasDocumentAttachment: Boolean(classification.hasDocumentAttachment),
-      reasons: Array.isArray(classification.reasons)
-        ? classification.reasons.map((entry) => String(entry || "").trim()).filter(Boolean).slice(0, 6)
-        : [],
-      candidates: Array.isArray(classification.candidates)
-        ? classification.candidates
-            .map((candidate) => ({
-              typeId: String(candidate?.typeId || "").trim().toLowerCase(),
-              label: String(candidate?.label || "").trim(),
-              score: clampNumber(candidate?.score, -100, 100, 0),
-            }))
-            .filter((candidate) => candidate.typeId)
-            .slice(0, 4)
-        : [],
-    },
+    classification: normalizeClassificationSummary({
+      ...classification,
+      selectedType: classification.selectedType || data.selectedType || "",
+    }),
     createdAt: toIsoTimestamp(data.createdAt),
     updatedAt: toIsoTimestamp(data.updatedAt),
   };
+}
+
+function normalizeClassificationSummary(classification) {
+  const source = classification && typeof classification === "object" ? classification : {};
+
+  return {
+    selectedType: String(source.selectedType || "").trim().toLowerCase(),
+    selectedLabel: String(source.selectedLabel || "").trim(),
+    score: clampNumber(source.score, 0, 100, 0),
+    marginToNext: clampNumber(source.marginToNext, -100, 100, 0),
+    hasDocumentAttachment: Boolean(source.hasDocumentAttachment),
+    reasons: Array.isArray(source.reasons)
+      ? source.reasons.map((entry) => String(entry || "").trim()).filter(Boolean).slice(0, 6)
+      : [],
+    candidates: Array.isArray(source.candidates)
+      ? source.candidates
+          .map((candidate) => ({
+            typeId: String(candidate?.typeId || "").trim().toLowerCase(),
+            label: String(candidate?.label || "").trim(),
+            score: clampNumber(candidate?.score, -100, 100, 0),
+          }))
+          .filter((candidate) => candidate.typeId)
+          .slice(0, 4)
+      : [],
+  };
+}
+
+function normalizeImportResult(importResult) {
+  const source = importResult && typeof importResult === "object" ? importResult : {};
+  return {
+    acceptedCount: clampNumber(source.acceptedCount, 0, 100, 0),
+    duplicateCount: clampNumber(source.duplicateCount, 0, 100, 0),
+    errorCount: clampNumber(source.errorCount, 0, 100, 0),
+  };
+}
+
+function normalizeSyncOutcome(outcome) {
+  const safeOutcome = String(outcome || "").trim().toLowerCase();
+  if (safeOutcome === "imported" || safeOutcome === "review" || safeOutcome === "blocked" || safeOutcome === "error") {
+    return safeOutcome;
+  }
+  return "blocked";
 }
 
 async function countPendingReviews({ db, userId, provider }) {
